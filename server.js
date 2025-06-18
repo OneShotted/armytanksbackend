@@ -1,28 +1,13 @@
 const express = require("express");
 const http = require("http");
 const path = require("path");
-const cors = require("cors");
-const { Server } = require("socket.io");
+const socketIO = require("socket.io");
 
 const app = express();
 const server = http.createServer(app);
+const io = socketIO(server);
 
 const PORT = process.env.PORT || 3000;
-
-// Allow cross-origin requests from Netlify frontend
-app.use(cors({
-  origin: "https://armytanks.netlify.app",
-  methods: ["GET", "POST"],
-  credentials: true
-}));
-
-const io = new Server(server, {
-  cors: {
-    origin: "https://armytanks.netlify.app",
-    methods: ["GET", "POST"],
-    credentials: true
-  }
-});
 
 app.use(express.static("public"));
 
@@ -73,7 +58,7 @@ setInterval(() => {
     b.y += Math.sin(b.angle) * b.speed;
   });
 
-  // Handle collisions
+  // Handle bullet collisions with players
   bullets = bullets.filter((bullet) => {
     const hit = Object.values(players).some((player) => {
       if (player.id === bullet.shooterId) return false;
@@ -89,7 +74,15 @@ setInterval(() => {
     return !hit && bullet.x >= 0 && bullet.x <= 2000 && bullet.y >= 0 && bullet.y <= 2000;
   });
 
-  io.emit("state", { players, bullets });
+  // Emit state to each client (excluding their own tank for smoothness)
+  Object.keys(players).forEach((id) => {
+    const otherPlayers = Object.values(players).filter(p => p.id !== id);
+    io.to(id).emit("state", {
+      players: Object.fromEntries(otherPlayers.map(p => [p.id, p])),
+      bullets
+    });
+  });
+
 }, 1000 / 60);
 
 server.listen(PORT, () => {
