@@ -45,8 +45,8 @@ const PORT = process.env.PORT || 3000;
 
 const TANK_SPEED = 3;
 const BULLET_SPEED = 7;
-const ARENA_WIDTH = 1600;
-const ARENA_HEIGHT = 1200;
+const ARENA_WIDTH = 1600;  // doubled from 800
+const ARENA_HEIGHT = 1200; // doubled from 600
 
 let players = {};
 let bullets = [];
@@ -58,7 +58,6 @@ app.get('/', (req, res) => {
 io.on('connection', (socket) => {
   console.log('Player connected', socket.id);
 
-  // Initialize new player with default username
   players[socket.id] = {
     id: socket.id,
     username: 'Anonymous',
@@ -66,6 +65,7 @@ io.on('connection', (socket) => {
     y: ARENA_HEIGHT / 2,
     angle: 0,
     health: 100,
+    tankType: 'sniper', // default tank type
     pressingUp: false,
     pressingDown: false,
     pressingLeft: false,
@@ -74,7 +74,6 @@ io.on('connection', (socket) => {
     lastShotTime: 0,
   };
 
-  // Listen for username set from client
   socket.on('setUsername', (name) => {
     if (players[socket.id]) {
       players[socket.id].username = String(name).substring(0, 15);
@@ -82,22 +81,13 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Respawn handler
-  socket.on('respawn', () => {
-    const p = players[socket.id];
-    if (p) {
-      p.health = 100;
-      p.x = ARENA_WIDTH / 2;
-      p.y = ARENA_HEIGHT / 2;
-      io.emit('playerUpdated', p);
+  socket.on('setTankType', (tankType) => {
+    if (players[socket.id]) {
+      const validTypes = ['sniper', 'minigun', 'shotgun'];
+      players[socket.id].tankType = validTypes.includes(tankType) ? tankType : 'sniper';
+      io.emit('playerUpdated', players[socket.id]);
     }
   });
-
-  // Send current game state to new player
-  socket.emit('init', { players, bullets });
-
-  // Notify others of new player
-  socket.broadcast.emit('newPlayer', players[socket.id]);
 
   socket.on('input', (input) => {
     const player = players[socket.id];
@@ -116,13 +106,23 @@ io.on('connection', (socket) => {
     delete players[socket.id];
     io.emit('playerDisconnected', socket.id);
   });
+
+  // Respawn event, reset health and position
+  socket.on('respawn', () => {
+    const player = players[socket.id];
+    if (player) {
+      player.health = 100;
+      player.x = ARENA_WIDTH / 2;
+      player.y = ARENA_HEIGHT / 2;
+      io.emit('playerUpdated', player);
+    }
+  });
 });
 
-// Game loop at ~60 FPS
+// Game loop ~60 FPS
 setInterval(() => {
   const now = Date.now();
 
-  // Update players
   for (const id in players) {
     const p = players[id];
 
@@ -135,47 +135,72 @@ setInterval(() => {
     p.x = Math.max(0, Math.min(ARENA_WIDTH, p.x));
     p.y = Math.max(0, Math.min(ARENA_HEIGHT, p.y));
 
-    // Shooting cooldown
+    // Shooting cooldown and bullet creation
     if (p.shooting && now - p.lastShotTime > 300) {
+      // Default bullet params
+      let speed = BULLET_SPEED;
+      let maxDistance = 1000; // normal range
+      let damage = 20;
+      let radius = 5;
+
+      if (p.tankType === 'sniper') {
+        speed = BULLET_SPEED * 2;
+        maxDistance = 2000; // twice as far
+      } else if (p.tankType === 'minigun') {
+        speed = BULLET_SPEED * 4;
+        maxDistance = 1000; // normal range
+      } else if (p.tankType === 'shotgun') {
+        radius = 10; // double radius
+        damage = 40; // double damage
+        maxDistance = 1000; // normal range
+      }
+
       bullets.push({
         id: Math.random().toString(36).substr(2, 9),
         x: p.x,
         y: p.y,
         angle: p.angle,
         ownerId: id,
-        speed: BULLET_SPEED,
+        speed: speed,
+        distanceTravelled: 0,
+        maxDistance: maxDistance,
+        damage: damage,
+        radius: radius,
       });
+
       p.lastShotTime = now;
     }
   }
 
-  // Update bullets
   bullets = bullets.filter((bullet) => {
-    bullet.x += Math.cos(bullet.angle) * bullet.speed;
-    bullet.y += Math.sin(bullet.angle) * bullet.speed;
+    const dx = Math.cos(bullet.angle) * bullet.speed;
+    const dy = Math.sin(bullet.angle) * bullet.speed;
 
-    // Remove bullets out of bounds
+    bullet.x += dx;
+    bullet.y += dy;
+    bullet.distanceTravelled += Math.sqrt(dx * dx + dy * dy);
+
     if (
+      bullet.distanceTravelled > bullet.maxDistance ||
       bullet.x < 0 || bullet.x > ARENA_WIDTH ||
       bullet.y < 0 || bullet.y > ARENA_HEIGHT
     ) return false;
 
-    // Check collisions
     for (const id in players) {
       if (id === bullet.ownerId) continue;
       const p = players[id];
-      const dx = p.x - bullet.x;
-      const dy = p.y - bullet.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
+      const distX = p.x - bullet.x;
+      const distY = p.y - bullet.y;
+      const dist = Math.sqrt(distX * distX + distY * distY);
 
-      if (dist < 20) { // collision radius
-        p.health -= 20;
+      if (dist < 20 + (bullet.radius || 5)) { // tank radius + bullet radius collision
+        p.health -= bullet.damage;
         if (p.health <= 0) {
-          p.health = 0; // set to zero here, respawn handled client/server
+          p.health = 100;
           p.x = ARENA_WIDTH / 2;
           p.y = ARENA_HEIGHT / 2;
         }
-        return false; // Remove bullet on hit
+        return false; // remove bullet
       }
     }
     return true;
@@ -187,3 +212,4 @@ setInterval(() => {
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+
