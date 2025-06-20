@@ -107,13 +107,14 @@ io.on('connection', (socket) => {
     io.emit('playerDisconnected', socket.id);
   });
 
-  // Respawn event, reset health and position
+  // Respawn event: reset health and set random position
   socket.on('respawn', () => {
     const player = players[socket.id];
     if (player) {
       player.health = 100;
-      player.x = ARENA_WIDTH / 2;
-      player.y = ARENA_HEIGHT / 2;
+      const margin = 50;
+      player.x = Math.random() * (ARENA_WIDTH - 2 * margin) + margin;
+      player.y = Math.random() * (ARENA_HEIGHT - 2 * margin) + margin;
       io.emit('playerUpdated', player);
     }
   });
@@ -136,7 +137,7 @@ setInterval(() => {
     p.y = Math.max(0, Math.min(ARENA_HEIGHT, p.y));
 
     // Shooting cooldown and bullet creation
-    if (p.shooting && now - p.lastShotTime > 300) {
+    if (p.shooting && now - p.lastShotTime > 300 && p.health > 0) {
       // Default bullet params
       let speed = BULLET_SPEED;
       let maxDistance = 1000; // normal range
@@ -144,10 +145,10 @@ setInterval(() => {
       let radius = 5;
 
       if (p.tankType === 'sniper') {
-        speed = BULLET_SPEED * 4; // extremely fast
+        speed = BULLET_SPEED * 8; // extremely fast (was 4x, now 8x)
         maxDistance = 2000; // twice as far
       } else if (p.tankType === 'minigun') {
-        speed = BULLET_SPEED * 3; // half previous 4x speed, now 2x
+        speed = BULLET_SPEED * 1.5; // half previous 3x speed, now 1.5x
         maxDistance = 1000; // normal range
       } else if (p.tankType === 'shotgun') {
         speed = BULLET_SPEED * 0.5; // half normal speed
@@ -196,10 +197,12 @@ setInterval(() => {
 
       if (dist < 20 + (bullet.radius || 5)) { // tank radius + bullet radius collision
         p.health -= bullet.damage;
+
         if (p.health <= 0) {
-          p.health = 100;
-          p.x = ARENA_WIDTH / 2;
-          p.y = ARENA_HEIGHT / 2;
+          p.health = 0;
+
+          // Notify only the player who died
+          io.to(p.id).emit('playerDied');
         }
         return false; // remove bullet
       }
@@ -213,4 +216,3 @@ setInterval(() => {
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
-
