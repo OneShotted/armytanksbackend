@@ -8,18 +8,38 @@ const cors = require('cors');
 const app = express();
 const server = http.createServer(app);
 
-const FRONTEND_URL = 'https://plorra.netlify.app';
+// Allowed frontend origins for CORS
+const allowedOrigins = [
+  'https://plorra.netlify.app',
+  'https://www.plorra.netlify.app', // optional www
+  'http://localhost:3000', // local dev
+];
 
+// CORS middleware for Express routes
 app.use(cors({
-  origin: FRONTEND_URL,
-  methods: ['GET', 'POST'],
+  origin: function(origin, callback) {
+    if (!origin) return callback(null, true); // allow non-browser clients like Postman
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(new Error('CORS error: Origin not allowed'));
+    }
+  },
+  methods: ['GET', 'POST']
 }));
 
 const io = new Server(server, {
   cors: {
-    origin: FRONTEND_URL,
+    origin: function(origin, callback) {
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.indexOf(origin) !== -1) {
+        callback(null, true);
+      } else {
+        callback(new Error('CORS error: Origin not allowed'));
+      }
+    },
     methods: ['GET', 'POST'],
-  },
+  }
 });
 
 const PORT = process.env.PORT || 3000;
@@ -58,9 +78,7 @@ io.on('connection', (socket) => {
   // Listen for username set from client
   socket.on('setUsername', (name) => {
     if (players[socket.id]) {
-      // Trim and limit username length
       players[socket.id].username = String(name).substring(0, 15);
-      // Optionally broadcast updated player data to others
       io.emit('playerUpdated', players[socket.id]);
     }
   });
