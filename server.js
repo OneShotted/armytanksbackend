@@ -29,6 +29,7 @@ function createEnemy() {
     };
 }
 
+// Spawn enemies periodically
 setInterval(() => {
     if (enemies.length < 10) {
         enemies.push(createEnemy());
@@ -37,13 +38,15 @@ setInterval(() => {
 }, 5000);
 
 io.on('connection', socket => {
-    console.log('New player:', socket.id);
+    console.log('New player connected:', socket.id);
 
+    // Create player with hotbar + inventory
     players[socket.id] = {
         id: socket.id,
         x: 500,
         y: 500,
-        petals: ['basic', 'basic', 'basic', 'basic', 'basic'],
+        petals: ['basic', 'basic', 'basic', 'basic', 'basic'], // hotbar
+        inventory: [] // collected petals go here
     };
 
     socket.emit('init', {
@@ -54,6 +57,7 @@ io.on('connection', socket => {
 
     io.emit('players', players);
 
+    // Handle movement
     socket.on('move', data => {
         const player = players[socket.id];
         if (player) {
@@ -63,20 +67,24 @@ io.on('connection', socket => {
         }
     });
 
+    // Handle collecting enemy petals
     socket.on('collect', enemyId => {
         const enemy = enemies.find(e => e.id === enemyId);
-        if (enemy && players[socket.id]) {
-            players[socket.id].petals.push(enemy.drop);
+        const player = players[socket.id];
+        if (enemy && player) {
+            player.inventory.push(enemy.drop); // Add to inventory, not hotbar
             enemies.splice(enemies.indexOf(enemy), 1);
             io.emit('enemies', enemies);
         }
     });
 
+    // Handle disconnects
     socket.on('disconnect', () => {
+        console.log('Player disconnected:', socket.id);
         delete players[socket.id];
         io.emit('players', players);
     });
 });
 
-server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+server.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
 
