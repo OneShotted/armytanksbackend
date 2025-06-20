@@ -1,150 +1,149 @@
+// server.js
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
-const cors = require('cors');
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
-    cors: { origin: '*' }
+  cors: { origin: '*' }
 });
-
-app.use(cors());
-app.get('/', (req, res) => res.send('Petal.io Server is running'));
 
 const PORT = process.env.PORT || 3000;
 
-const players = {};
-const enemies = [];
-const petalDrops = [];
+const TANK_SPEED = 3;
+const BULLET_SPEED = 7;
+const ARENA_WIDTH = 800;
+const ARENA_HEIGHT = 600;
 
-function getRandomPetal() {
-    const types = ['basic', 'rock'];
-    const type = types[Math.floor(Math.random() * types.length)];
+let players = {};
+let bullets = [];
 
-    const baseStats = {
-        basic: { hp: 3, damage: 1 },
-        rock: { hp: 6, damage: 0.5 }
-    };
-
-    return {
-        id: 'p' + Date.now() + Math.random(),
-        type,
-        hp: baseStats[type].hp,
-        damage: baseStats[type].damage,
-        isReloading: false
-    };
+function randomPosition() {
+  return {
+    x: Math.floor(Math.random() * ARENA_WIDTH),
+    y: Math.floor(Math.random() * ARENA_HEIGHT)
+  };
 }
-
-function createEnemy() {
-    return {
-        id: 'e' + Date.now() + Math.random(),
-        x: Math.random() * 2000,
-        y: Math.random() * 2000,
-        hp: 5,
-        drop: getRandomPetal()
-    };
-}
-
-setInterval(() => {
-    if (enemies.length < 10) {
-        enemies.push(createEnemy());
-        io.emit('enemies', enemies);
-    }
-}, 5000);
 
 io.on('connection', socket => {
-    console.log('New player:', socket.id);
+  console.log('Player connected', socket.id);
 
-    players[socket.id] = {
-        id: socket.id,
-        x: 500,
-        y: 500,
-        petals: Array.from({ length: 5 }).map(() => getRandomPetal()),
-        inventory: []
-    };
+  // Add new player
+  players[socket.id] = {
+    id: socket.id,
+    x: ARENA_WIDTH / 2,
+    y: ARENA_HEIGHT / 2,
+    angle: 0,
+    health: 100,
+    pressingUp: false,
+    pressingDown: false,
+    pressingLeft: false,
+    pressingRight: false,
+    shooting: false,
+    lastShotTime: 0
+  };
 
-    socket.emit('init', {
-        id: socket.id,
-        players,
-        enemies,
-        drops: petalDrops
-    });
+  // Send existing players and bullets to the new player
+  socket.emit('init', { players, bullets });
 
-    io.emit('players', players);
+  // Broadcast new player to others
+  socket.broadcast.emit('newPlayer', players[socket.id]);
 
-    socket.on('move', data => {
-        const player = players[socket.id];
-        if (player) {
-            player.x += data.dx;
-            player.y += data.dy;
+  // Receive input from client
+  socket.on('input', input => {
+    const player = players[socket.id];
+    if (!player) return;
+    player.pressingUp = input.up;
+    player.pressingDown = input.down;
+    player.pressingLeft = input.left;
+    player.pressingRight = input.right;
+    player.angle = input.angle;
+    player.shooting = input.shooting;
+  });
 
-            // Pickup petals
-            for (let i = petalDrops.length - 1; i >= 0; i--) {
-                const drop = petalDrops[i];
-                const dist = Math.hypot(player.x - drop.x, player.y - drop.y);
-                if (dist < 30) {
-                    player.inventory.push(drop.petal);
-                    petalDrops.splice(i, 1);
-                }
-            }
-
-            io.emit('players', players);
-            io.emit('drops', petalDrops);
-        }
-    });
-
-    socket.on('petalAttack', ({ petalId, x, y }) => {
-        const player = players[socket.id];
-        if (!player) return;
-
-        const petal = player.petals.find(p => p.id === petalId);
-        if (!petal || petal.isReloading || petal.hp <= 0) return;
-
-        enemies.forEach((enemy, i) => {
-            const dist = Math.hypot(enemy.x - x, enemy.y - y);
-            if (dist < 20) {
-                enemy.hp -= petal.damage;
-                petal.hp -= 1;
-
-                if (petal.hp <= 0) {
-                    petal.isReloading = true;
-                    setTimeout(() => {
-                        petal.hp = 3; // reset to full hp
-                        petal.isReloading = false;
-                        io.emit('players', players); // update clients
-                    }, 1000);
-                }
-
-                if (enemy.hp <= 0) {
-                    petalDrops.push({
-                        x: enemy.x,
-                        y: enemy.y,
-                        petal: enemy.drop
-                    });
-                    enemies.splice(i, 1);
-                }
-
-                io.emit('enemies', enemies);
-                io.emit('drops', petalDrops);
-                io.emit('players', players);
-            }
-        });
-    });
-
-    // NEW: listen for petal/inventory updates from client
-    socket.on('updatePetalsInventory', ({ petals, inventory }) => {
-        if (!players[socket.id]) return;
-        players[socket.id].petals = petals;
-        players[socket.id].inventory = inventory;
-        io.emit('players', players);
-    });
-
-    socket.on('disconnect', () => {
-        delete players[socket.id];
-        io.emit('players', players);
-    });
+  socket.on('disconnect', () => {
+    console.log('Player disconnected', socket.id);
+    delete players[socket.id];
+    io.emit('playerDisconnected', socket.id);
+  });
 });
 
-server.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
+// Game loop, 60 ticks per second
+setInterval(() => {
+  const now = Date.now();
+
+  // Update players positions
+  for (const id in players) {
+    const p = players[id];
+
+    // Movement
+    if (p.pressingUp) p.y -= TANK_SPEED;
+    if (p.pressingDown) p.y += TANK_SPEED;
+    if (p.pressingLeft) p.x -= TANK_SPEED;
+    if (p.pressingRight) p.x += TANK_SPEED;
+
+    // Keep inside arena
+    p.x = Math.max(0, Math.min(ARENA_WIDTH, p.x));
+    p.y = Math.max(0, Math.min(ARENA_HEIGHT, p.y));
+
+    // Shooting
+    if (p.shooting && now - p.lastShotTime > 300) { // 300ms cooldown
+      bullets.push({
+        id: Math.random().toString(36).substr(2, 9),
+        x: p.x,
+        y: p.y,
+        angle: p.angle,
+        ownerId: id,
+        speed: BULLET_SPEED
+      });
+      p.lastShotTime = now;
+    }
+  }
+
+  // Update bullets positions
+  bullets = bullets.filter(bullet => {
+    bullet.x += Math.cos(bullet.angle) * bullet.speed;
+    bullet.y += Math.sin(bullet.angle) * bullet.speed;
+
+    // Remove bullets outside arena
+    if (
+      bullet.x < 0 || bullet.x > ARENA_WIDTH ||
+      bullet.y < 0 || bullet.y > ARENA_HEIGHT
+    ) {
+      return false;
+    }
+
+    // Check bullet collision with players (except owner)
+    for (const id in players) {
+      if (id === bullet.ownerId) continue;
+      const p = players[id];
+      const dx = p.x - bullet.x;
+      const dy = p.y - bullet.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < 20) { // collision radius
+        p.health -= 20;
+        if (p.health <= 0) {
+          p.health = 100;
+          p.x = ARENA_WIDTH / 2;
+          p.y = ARENA_HEIGHT / 2;
+        }
+        return false; // Remove bullet
+      }
+    }
+
+    return true; // Keep bullet
+  });
+
+  // Broadcast game state to all clients
+  io.emit('gameState', {
+    players,
+    bullets
+  });
+
+}, 1000 / 60);
+
+server.listen(PORT, () => {
+  console.log(`Server listening on port ${PORT}`);
+});
 
