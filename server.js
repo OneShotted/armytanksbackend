@@ -147,7 +147,7 @@ setInterval(() => {
         speed = BULLET_SPEED * 4; // extremely fast
         maxDistance = 2000; // twice as far
       } else if (p.tankType === 'minigun') {
-        speed = BULLET_SPEED * 2; // half previous 4x speed, now 2x
+        speed = BULLET_SPEED * 3; // half previous 4x speed, now 2x
         maxDistance = 1000; // normal range
       } else if (p.tankType === 'shotgun') {
         speed = BULLET_SPEED * 0.5; // half normal speed
