@@ -82,6 +82,17 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Respawn handler
+  socket.on('respawn', () => {
+    const p = players[socket.id];
+    if (p) {
+      p.health = 100;
+      p.x = ARENA_WIDTH / 2;
+      p.y = ARENA_HEIGHT / 2;
+      io.emit('playerUpdated', p);
+    }
+  });
+
   // Send current game state to new player
   socket.emit('init', { players, bullets });
 
@@ -160,7 +171,7 @@ setInterval(() => {
       if (dist < 20) { // collision radius
         p.health -= 20;
         if (p.health <= 0) {
-          p.health = 100;
+          p.health = 0; // set to zero here, respawn handled client/server
           p.x = ARENA_WIDTH / 2;
           p.y = ARENA_HEIGHT / 2;
         }
