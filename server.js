@@ -10,8 +10,7 @@ const server = http.createServer(app);
 
 // Allowed frontend origins for CORS
 const allowedOrigins = [
-  'https://plorra.netlify.app',
-  'https://www.plorra.netlify.app', // optional www
+  'https://armytanks.netlify.app',
   'http://localhost:3000', // local dev
 ];
 
