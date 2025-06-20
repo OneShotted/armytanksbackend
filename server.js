@@ -23,12 +23,6 @@ const io = new Server(server, {
   },
 });
 
-const io = new Server(server, {
-  cors: {
-    origin: FRONTEND_URL,
-    methods: ['GET', 'POST'],
-  },
-});
 
 const PORT = process.env.PORT || 3000;
 
