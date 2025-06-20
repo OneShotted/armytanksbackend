@@ -18,18 +18,31 @@ const players = {};
 const enemies = [];
 const petalDrops = [];
 
+function getRandomPetal() {
+    const types = ['basic', 'rock'];
+    const type = types[Math.floor(Math.random() * types.length)];
+
+    const baseStats = {
+        basic: { hp: 3, damage: 1 },
+        rock: { hp: 6, damage: 0.5 }
+    };
+
+    return {
+        id: 'p' + Date.now() + Math.random(),
+        type,
+        hp: baseStats[type].hp,
+        damage: baseStats[type].damage,
+        isReloading: false
+    };
+}
+
 function createEnemy() {
     return {
         id: 'e' + Date.now() + Math.random(),
         x: Math.random() * 2000,
         y: Math.random() * 2000,
         hp: 5,
-        drop: {
-            id: 'p' + Date.now(),
-            type: 'basic',
-            hp: 3,
-            damage: 1
-        }
+        drop: getRandomPetal()
     };
 }
 
@@ -47,12 +60,7 @@ io.on('connection', socket => {
         id: socket.id,
         x: 500,
         y: 500,
-        petals: Array.from({ length: 5 }).map((_, i) => ({
-            id: 'p' + i,
-            type: 'basic',
-            hp: 3,
-            damage: 1
-        })),
+        petals: Array.from({ length: 5 }).map(() => getRandomPetal()),
         inventory: []
     };
 
@@ -71,7 +79,7 @@ io.on('connection', socket => {
             player.x += data.dx;
             player.y += data.dy;
 
-            // Check petal drops
+            // Pickup petals
             for (let i = petalDrops.length - 1; i >= 0; i--) {
                 const drop = petalDrops[i];
                 const dist = Math.hypot(player.x - drop.x, player.y - drop.y);
@@ -87,10 +95,27 @@ io.on('connection', socket => {
     });
 
     socket.on('petalAttack', ({ petalId, x, y }) => {
+        const player = players[socket.id];
+        if (!player) return;
+
+        const petal = player.petals.find(p => p.id === petalId);
+        if (!petal || petal.isReloading || petal.hp <= 0) return;
+
         enemies.forEach((enemy, i) => {
             const dist = Math.hypot(enemy.x - x, enemy.y - y);
             if (dist < 20) {
-                enemy.hp -= 1;
+                enemy.hp -= petal.damage;
+                petal.hp -= 1;
+
+                if (petal.hp <= 0) {
+                    petal.isReloading = true;
+                    setTimeout(() => {
+                        petal.hp = 3; // reset to full hp
+                        petal.isReloading = false;
+                        io.emit('players', players); // update client
+                    }, 1000);
+                }
+
                 if (enemy.hp <= 0) {
                     petalDrops.push({
                         x: enemy.x,
@@ -99,8 +124,10 @@ io.on('connection', socket => {
                     });
                     enemies.splice(i, 1);
                 }
+
                 io.emit('enemies', enemies);
                 io.emit('drops', petalDrops);
+                io.emit('players', players);
             }
         });
     });
