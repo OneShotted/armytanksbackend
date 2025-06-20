@@ -8,12 +8,11 @@ const cors = require('cors');
 const app = express();
 const server = http.createServer(app);
 
-
 const FRONTEND_URL = 'https://plorra.netlify.app';
 
 app.use(cors({
   origin: FRONTEND_URL,
-  methods: ['GET', 'POST']
+  methods: ['GET', 'POST'],
 }));
 
 const io = new Server(server, {
@@ -22,7 +21,6 @@ const io = new Server(server, {
     methods: ['GET', 'POST'],
   },
 });
-
 
 const PORT = process.env.PORT || 3000;
 
@@ -41,9 +39,10 @@ app.get('/', (req, res) => {
 io.on('connection', (socket) => {
   console.log('Player connected', socket.id);
 
-  // Initialize new player
+  // Initialize new player with default username
   players[socket.id] = {
     id: socket.id,
+    username: 'Anonymous',
     x: ARENA_WIDTH / 2,
     y: ARENA_HEIGHT / 2,
     angle: 0,
@@ -55,6 +54,16 @@ io.on('connection', (socket) => {
     shooting: false,
     lastShotTime: 0,
   };
+
+  // Listen for username set from client
+  socket.on('setUsername', (name) => {
+    if (players[socket.id]) {
+      // Trim and limit username length
+      players[socket.id].username = String(name).substring(0, 15);
+      // Optionally broadcast updated player data to others
+      io.emit('playerUpdated', players[socket.id]);
+    }
+  });
 
   // Send current game state to new player
   socket.emit('init', { players, bullets });
@@ -150,4 +159,3 @@ setInterval(() => {
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
-
