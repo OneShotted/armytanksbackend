@@ -112,7 +112,7 @@ io.on('connection', socket => {
                     setTimeout(() => {
                         petal.hp = 3; // reset to full hp
                         petal.isReloading = false;
-                        io.emit('players', players); // update client
+                        io.emit('players', players); // update clients
                     }, 1000);
                 }
 
@@ -132,6 +132,14 @@ io.on('connection', socket => {
         });
     });
 
+    // NEW: listen for petal/inventory updates from client
+    socket.on('updatePetalsInventory', ({ petals, inventory }) => {
+        if (!players[socket.id]) return;
+        players[socket.id].petals = petals;
+        players[socket.id].inventory = inventory;
+        io.emit('players', players);
+    });
+
     socket.on('disconnect', () => {
         delete players[socket.id];
         io.emit('players', players);
@@ -139,3 +147,4 @@ io.on('connection', socket => {
 });
 
 server.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
+
