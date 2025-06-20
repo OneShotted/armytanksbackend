@@ -45,8 +45,8 @@ const PORT = process.env.PORT || 3000;
 
 const TANK_SPEED = 3;
 const BULLET_SPEED = 7;
-const ARENA_WIDTH = 1600;  // doubled from 800
-const ARENA_HEIGHT = 1200; // doubled from 600
+const ARENA_WIDTH = 3200;  // doubled from 800
+const ARENA_HEIGHT = 2400; // doubled from 600
 
 let players = {};
 let bullets = [];
