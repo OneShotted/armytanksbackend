@@ -6,9 +6,7 @@ const cors = require('cors');
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
-    cors: {
-        origin: "*"
-    }
+    cors: { origin: '*' }
 });
 
 app.use(cors());
@@ -18,18 +16,23 @@ const PORT = process.env.PORT || 3000;
 
 const players = {};
 const enemies = [];
+const petalDrops = [];
 
 function createEnemy() {
     return {
-        id: Date.now() + Math.random(),
+        id: 'e' + Date.now() + Math.random(),
         x: Math.random() * 2000,
         y: Math.random() * 2000,
-        hp: 3,
-        drop: 'basic'
+        hp: 5,
+        drop: {
+            id: 'p' + Date.now(),
+            type: 'basic',
+            hp: 3,
+            damage: 1
+        }
     };
 }
 
-// Spawn enemies periodically
 setInterval(() => {
     if (enemies.length < 10) {
         enemies.push(createEnemy());
@@ -38,53 +41,74 @@ setInterval(() => {
 }, 5000);
 
 io.on('connection', socket => {
-    console.log('New player connected:', socket.id);
+    console.log('New player:', socket.id);
 
-    // Create player with hotbar + inventory
     players[socket.id] = {
         id: socket.id,
         x: 500,
         y: 500,
-        petals: ['basic', 'basic', 'basic', 'basic', 'basic'], // hotbar
-        inventory: [] // collected petals go here
+        petals: Array.from({ length: 5 }).map((_, i) => ({
+            id: 'p' + i,
+            type: 'basic',
+            hp: 3,
+            damage: 1
+        })),
+        inventory: []
     };
 
     socket.emit('init', {
         id: socket.id,
         players,
-        enemies
+        enemies,
+        drops: petalDrops
     });
 
     io.emit('players', players);
 
-    // Handle movement
     socket.on('move', data => {
         const player = players[socket.id];
         if (player) {
             player.x += data.dx;
             player.y += data.dy;
+
+            // Check petal drops
+            for (let i = petalDrops.length - 1; i >= 0; i--) {
+                const drop = petalDrops[i];
+                const dist = Math.hypot(player.x - drop.x, player.y - drop.y);
+                if (dist < 30) {
+                    player.inventory.push(drop.petal);
+                    petalDrops.splice(i, 1);
+                }
+            }
+
             io.emit('players', players);
+            io.emit('drops', petalDrops);
         }
     });
 
-    // Handle collecting enemy petals
-    socket.on('collect', enemyId => {
-        const enemy = enemies.find(e => e.id === enemyId);
-        const player = players[socket.id];
-        if (enemy && player) {
-            player.inventory.push(enemy.drop); // Add to inventory, not hotbar
-            enemies.splice(enemies.indexOf(enemy), 1);
-            io.emit('enemies', enemies);
-        }
+    socket.on('petalAttack', ({ petalId, x, y }) => {
+        enemies.forEach((enemy, i) => {
+            const dist = Math.hypot(enemy.x - x, enemy.y - y);
+            if (dist < 20) {
+                enemy.hp -= 1;
+                if (enemy.hp <= 0) {
+                    petalDrops.push({
+                        x: enemy.x,
+                        y: enemy.y,
+                        petal: enemy.drop
+                    });
+                    enemies.splice(i, 1);
+                }
+                io.emit('enemies', enemies);
+                io.emit('drops', petalDrops);
+            }
+        });
     });
 
-    // Handle disconnects
     socket.on('disconnect', () => {
-        console.log('Player disconnected:', socket.id);
         delete players[socket.id];
         io.emit('players', players);
     });
 });
 
 server.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
-
