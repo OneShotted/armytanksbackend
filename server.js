@@ -9,12 +9,19 @@ const app = express();
 const server = http.createServer(app);
 
 
-const FRONTEND_URL = 'https://plorra.netlify.app/';
+const FRONTEND_URL = 'https://plorra.netlify.app';
 
 app.use(cors({
   origin: FRONTEND_URL,
   methods: ['GET', 'POST']
 }));
+
+const io = new Server(server, {
+  cors: {
+    origin: FRONTEND_URL,
+    methods: ['GET', 'POST'],
+  },
+});
 
 const io = new Server(server, {
   cors: {
