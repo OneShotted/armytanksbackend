@@ -231,7 +231,37 @@ setInterval(() => {
     bullet.y += dy;
     bullet.distanceTravelled += Math.sqrt(dx * dx + dy * dy);
 
-    if (
+     if (
       bullet.distanceTravelled > bullet.maxDistance ||
-      bullet.x < 
+      bullet.x < 0 || bullet.x > ARENA_WIDTH ||
+      bullet.y < 0 || bullet.y > ARENA_HEIGHT
+    ) return false;
 
+    for (const id in players) {
+      if (id === bullet.ownerId) continue;
+      const p = players[id];
+      const distX = p.x - bullet.x;
+      const distY = p.y - bullet.y;
+      const dist = Math.sqrt(distX * distX + distY * distY);
+
+      if (dist < 20 + (bullet.radius || 5)) { // tank radius + bullet radius collision
+        p.health -= bullet.damage;
+
+        if (p.health <= 0) {
+          p.health = 0;
+
+          // Notify only the player who died
+          io.to(p.id).emit('playerDied');
+        }
+        return false; // remove bullet
+      }
+    }
+    return true;
+  });
+
+  io.emit('gameState', { players, bullets });
+}, 1000 / 60);
+
+server.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
