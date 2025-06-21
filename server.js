@@ -54,58 +54,49 @@ const ENCLOSURE_SIZE = 600;
 const WALL_THICKNESS = 40;
 const ENTRANCE_SIZE = 100;
 
-// Walls placed relative to spawnX/spawnY with integer coords for crispness
 const walls = [
-  // Top wall left segment
   {
     x: spawnX - ENCLOSURE_SIZE / 2,
     y: spawnY - ENCLOSURE_SIZE / 2,
     width: (ENCLOSURE_SIZE - ENTRANCE_SIZE) / 2,
     height: WALL_THICKNESS,
   },
-  // Top wall right segment
   {
     x: spawnX + ENTRANCE_SIZE / 2,
     y: spawnY - ENCLOSURE_SIZE / 2,
     width: (ENCLOSURE_SIZE - ENTRANCE_SIZE) / 2,
     height: WALL_THICKNESS,
   },
-  // Bottom wall left segment
   {
     x: spawnX - ENCLOSURE_SIZE / 2,
     y: spawnY + ENCLOSURE_SIZE / 2 - WALL_THICKNESS,
     width: (ENCLOSURE_SIZE - ENTRANCE_SIZE) / 2,
     height: WALL_THICKNESS,
   },
-  // Bottom wall right segment
   {
     x: spawnX + ENTRANCE_SIZE / 2,
     y: spawnY + ENCLOSURE_SIZE / 2 - WALL_THICKNESS,
     width: (ENCLOSURE_SIZE - ENTRANCE_SIZE) / 2,
     height: WALL_THICKNESS,
   },
-  // Left wall top segment
   {
     x: spawnX - ENCLOSURE_SIZE / 2,
     y: spawnY - ENCLOSURE_SIZE / 2 + WALL_THICKNESS,
     width: WALL_THICKNESS,
     height: (ENCLOSURE_SIZE - ENTRANCE_SIZE) / 2 - WALL_THICKNESS,
   },
-  // Left wall bottom segment
   {
     x: spawnX - ENCLOSURE_SIZE / 2,
     y: spawnY + ENTRANCE_SIZE / 2,
     width: WALL_THICKNESS,
     height: (ENCLOSURE_SIZE - ENTRANCE_SIZE) / 2 - WALL_THICKNESS,
   },
-  // Right wall top segment
   {
     x: spawnX + ENCLOSURE_SIZE / 2 - WALL_THICKNESS,
     y: spawnY - ENCLOSURE_SIZE / 2 + WALL_THICKNESS,
     width: WALL_THICKNESS,
     height: (ENCLOSURE_SIZE - ENTRANCE_SIZE) / 2 - WALL_THICKNESS,
   },
-  // Right wall bottom segment
   {
     x: spawnX + ENCLOSURE_SIZE / 2 - WALL_THICKNESS,
     y: spawnY + ENTRANCE_SIZE / 2,
@@ -117,7 +108,6 @@ const walls = [
 let players = {};
 let bullets = [];
 
-// Collision helpers same as before
 function circleRectCollision(cx, cy, radius, rx, ry, rw, rh) {
   let closestX = Math.max(rx, Math.min(cx, rx + rw));
   let closestY = Math.max(ry, Math.min(cy, ry + rh));
@@ -135,19 +125,16 @@ function lineRectCollision(x1, y1, x2, y2, rx, ry, rw, rh) {
     return (ua >= 0 && ua <= 1 && ub >= 0 && ub <= 1);
   }
 
-  if (
+  return (
     lineLine(x1, y1, x2, y2, rx, ry, rx + rw, ry) ||
     lineLine(x1, y1, x2, y2, rx, ry, rx, ry + rh) ||
     lineLine(x1, y1, x2, y2, rx + rw, ry, rx + rw, ry + rh) ||
     lineLine(x1, y1, x2, y2, rx, ry + rh, rx + rw, ry + rh)
-  ) {
-    return true;
-  }
-  return false;
+  );
 }
 
 app.get('/', (req, res) => {
-  res.send('BlockTanks.io Socket.io Server running');
+  res.send('ArmyTanks.io server is running');
 });
 
 io.on('connection', (socket) => {
@@ -188,7 +175,6 @@ io.on('connection', (socket) => {
     const player = players[socket.id];
     if (!player) return;
 
-    // Calculate new position
     let newX = player.x;
     let newY = player.y;
 
@@ -197,7 +183,6 @@ io.on('connection', (socket) => {
     if (input.left) newX -= TANK_SPEED;
     if (input.right) newX += TANK_SPEED;
 
-    // Check collision with walls
     let collision = false;
     for (const wall of walls) {
       if (circleRectCollision(newX, newY, TANK_RADIUS, wall.x, wall.y, wall.width, wall.height)) {
@@ -207,7 +192,6 @@ io.on('connection', (socket) => {
     }
 
     if (!collision) {
-      // Clamp to arena bounds
       player.x = Math.max(TANK_RADIUS, Math.min(ARENA_WIDTH - TANK_RADIUS, newX));
       player.y = Math.max(TANK_RADIUS, Math.min(ARENA_HEIGHT - TANK_RADIUS, newY));
     }
@@ -216,18 +200,10 @@ io.on('connection', (socket) => {
     player.shooting = input.shooting;
   });
 
-  socket.on('chatMessage', (msg) => {
-  const player = players[socket.id];
-  const username = player?.username || 'Anonymous';
-  const message = {
-    id: socket.id,
-    username,
-    text: String(msg).substring(0, 200),
-    timestamp: Date.now(),
-  };
-  io.emit('chatMessage', message);
-});
-
+  socket.on('chatMessage', ({ username, message }) => {
+    if (!username || !message) return;
+    io.emit('chatMessage', { username, message });
+  });
 
   socket.on('disconnect', () => {
     console.log('Player disconnected', socket.id);
@@ -293,7 +269,6 @@ setInterval(() => {
     const nextX = bullet.x + dx;
     const nextY = bullet.y + dy;
 
-    // Bullet collision with walls blocks bullet
     for (const wall of walls) {
       if (lineRectCollision(bullet.x, bullet.y, nextX, nextY, wall.x, wall.y, wall.width, wall.height)) {
         return false;
@@ -319,7 +294,6 @@ setInterval(() => {
 
       if (dist < TANK_RADIUS + (bullet.radius || 5)) {
         p.health -= bullet.damage;
-
         if (p.health <= 0) {
           p.health = 0;
           io.to(p.id).emit('playerDied');
