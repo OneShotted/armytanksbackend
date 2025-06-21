@@ -1,5 +1,3 @@
-// server.js
-
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -200,6 +198,7 @@ io.on('connection', (socket) => {
     player.shooting = input.shooting;
   });
 
+  // CHAT MESSAGE handler: receive from client and broadcast
   socket.on('chatMessage', ({ username, message }) => {
     if (!username || !message) return;
     io.emit('chatMessage', { username, message });
@@ -311,3 +310,4 @@ setInterval(() => {
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+
