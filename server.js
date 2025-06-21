@@ -48,6 +48,14 @@ const BULLET_SPEED = 7;
 const ARENA_WIDTH = 3200;  // doubled from 800
 const ARENA_HEIGHT = 2400; // doubled from 600
 
+// Walls array — match client-side exactly
+const walls = [
+  { x: 600, y: 600, width: 200, height: 40 },
+  { x: 1500, y: 1200, width: 300, height: 50 },
+  { x: 2500, y: 1800, width: 100, height: 300 },
+  // add more walls as needed
+];
+
 let players = {};
 let bullets = [];
 
@@ -120,6 +128,20 @@ io.on('connection', (socket) => {
   });
 });
 
+// Helper: check if two rectangles overlap
+function rectsOverlap(r1, r2) {
+  return !(
+    r1.x + r1.width < r2.x ||
+    r1.x > r2.x + r2.width ||
+    r1.y + r1.height < r2.y ||
+    r1.y > r2.y + r2.height
+  );
+}
+
+// Player size approximation (match your drawTank sizes)
+const PLAYER_WIDTH = 30;
+const PLAYER_HEIGHT = 20;
+
 // Game loop ~60 FPS
 setInterval(() => {
   const now = Date.now();
@@ -127,14 +149,41 @@ setInterval(() => {
   for (const id in players) {
     const p = players[id];
 
-    if (p.pressingUp) p.y -= TANK_SPEED;
-    if (p.pressingDown) p.y += TANK_SPEED;
-    if (p.pressingLeft) p.x -= TANK_SPEED;
-    if (p.pressingRight) p.x += TANK_SPEED;
+    // Calculate proposed new position based on input
+    let newX = p.x;
+    let newY = p.y;
 
-    // Clamp inside arena
-    p.x = Math.max(0, Math.min(ARENA_WIDTH, p.x));
-    p.y = Math.max(0, Math.min(ARENA_HEIGHT, p.y));
+    if (p.pressingUp) newY -= TANK_SPEED;
+    if (p.pressingDown) newY += TANK_SPEED;
+    if (p.pressingLeft) newX -= TANK_SPEED;
+    if (p.pressingRight) newX += TANK_SPEED;
+
+    // Player rectangle at new position
+    const playerRect = {
+      x: newX - PLAYER_WIDTH / 2,
+      y: newY - PLAYER_HEIGHT / 2,
+      width: PLAYER_WIDTH,
+      height: PLAYER_HEIGHT,
+    };
+
+    // Check collision with walls
+    let collision = false;
+    for (const wall of walls) {
+      if (rectsOverlap(playerRect, wall)) {
+        collision = true;
+        break;
+      }
+    }
+
+    // If no collision, update position
+    if (!collision) {
+      p.x = newX;
+      p.y = newY;
+    }
+
+    // Clamp inside arena bounds
+    p.x = Math.max(PLAYER_WIDTH / 2, Math.min(ARENA_WIDTH - PLAYER_WIDTH / 2, p.x));
+    p.y = Math.max(PLAYER_HEIGHT / 2, Math.min(ARENA_HEIGHT - PLAYER_HEIGHT / 2, p.y));
 
     // Shooting cooldown and bullet creation
     if (p.shooting && now - p.lastShotTime > 300 && p.health > 0) {
@@ -145,16 +194,16 @@ setInterval(() => {
       let radius = 5;
 
       if (p.tankType === 'sniper') {
-        speed = BULLET_SPEED * 8; // extremely fast (was 4x, now 8x)
-        maxDistance = 2000; // twice as far
+        speed = BULLET_SPEED * 8; // extremely fast
+        maxDistance = 2000;
       } else if (p.tankType === 'minigun') {
-        speed = BULLET_SPEED * 1.5; // half previous 3x speed, now 1.5x
-        maxDistance = 1000; // normal range
+        speed = BULLET_SPEED * 1.5;
+        maxDistance = 1000;
       } else if (p.tankType === 'shotgun') {
-        speed = BULLET_SPEED * 0.5; // half normal speed
-        radius = 10; // double radius
-        damage = 40; // double damage
-        maxDistance = 1000; // normal range
+        speed = BULLET_SPEED * 0.5;
+        radius = 10;
+        damage = 40;
+        maxDistance = 1000;
       }
 
       bullets.push({
@@ -184,35 +233,5 @@ setInterval(() => {
 
     if (
       bullet.distanceTravelled > bullet.maxDistance ||
-      bullet.x < 0 || bullet.x > ARENA_WIDTH ||
-      bullet.y < 0 || bullet.y > ARENA_HEIGHT
-    ) return false;
+      bullet.x < 
 
-    for (const id in players) {
-      if (id === bullet.ownerId) continue;
-      const p = players[id];
-      const distX = p.x - bullet.x;
-      const distY = p.y - bullet.y;
-      const dist = Math.sqrt(distX * distX + distY * distY);
-
-      if (dist < 20 + (bullet.radius || 5)) { // tank radius + bullet radius collision
-        p.health -= bullet.damage;
-
-        if (p.health <= 0) {
-          p.health = 0;
-
-          // Notify only the player who died
-          io.to(p.id).emit('playerDied');
-        }
-        return false; // remove bullet
-      }
-    }
-    return true;
-  });
-
-  io.emit('gameState', { players, bullets });
-}, 1000 / 60);
-
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
