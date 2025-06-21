@@ -1,325 +1,199 @@
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
-const cors = require('cors');
 
 const app = express();
 const server = http.createServer(app);
-
-const allowedOrigins = [
-  'https://armytanks.netlify.app',
-  'http://localhost:3000',
-];
-
-app.use(cors({
-  origin: function(origin, callback) {
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('CORS error: Origin not allowed'));
-    }
-  },
-  methods: ['GET', 'POST']
-}));
-
 const io = new Server(server, {
-  cors: {
-    origin: function(origin, callback) {
-      if (!origin) return callback(null, true);
-      if (allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error('CORS error: Origin not allowed'));
-      }
-    },
-    methods: ['GET', 'POST'],
-  }
+  cors: { origin: '*' }
 });
 
-const PORT = process.env.PORT || 3000;
-
-const TANK_SPEED = 3;
-const BULLET_SPEED = 7;
 const ARENA_WIDTH = 3200;
 const ARENA_HEIGHT = 2400;
-const TANK_RADIUS = 20;
 
-const spawnX = Math.floor(ARENA_WIDTH / 2);
-const spawnY = Math.floor(ARENA_HEIGHT / 2);
-
-const ENCLOSURE_SIZE = 600;
-const WALL_THICKNESS = 40;
-const ENTRANCE_SIZE = 100;
-
-const walls = [
-  {
-    x: spawnX - ENCLOSURE_SIZE / 2,
-    y: spawnY - ENCLOSURE_SIZE / 2,
-    width: (ENCLOSURE_SIZE - ENTRANCE_SIZE) / 2,
-    height: WALL_THICKNESS,
-  },
-  {
-    x: spawnX + ENTRANCE_SIZE / 2,
-    y: spawnY - ENCLOSURE_SIZE / 2,
-    width: (ENCLOSURE_SIZE - ENTRANCE_SIZE) / 2,
-    height: WALL_THICKNESS,
-  },
-  {
-    x: spawnX - ENCLOSURE_SIZE / 2,
-    y: spawnY + ENCLOSURE_SIZE / 2 - WALL_THICKNESS,
-    width: (ENCLOSURE_SIZE - ENTRANCE_SIZE) / 2,
-    height: WALL_THICKNESS,
-  },
-  {
-    x: spawnX + ENTRANCE_SIZE / 2,
-    y: spawnY + ENCLOSURE_SIZE / 2 - WALL_THICKNESS,
-    width: (ENCLOSURE_SIZE - ENTRANCE_SIZE) / 2,
-    height: WALL_THICKNESS,
-  },
-  {
-    x: spawnX - ENCLOSURE_SIZE / 2,
-    y: spawnY - ENCLOSURE_SIZE / 2 + WALL_THICKNESS,
-    width: WALL_THICKNESS,
-    height: (ENCLOSURE_SIZE - ENTRANCE_SIZE) / 2 - WALL_THICKNESS,
-  },
-  {
-    x: spawnX - ENCLOSURE_SIZE / 2,
-    y: spawnY + ENTRANCE_SIZE / 2,
-    width: WALL_THICKNESS,
-    height: (ENCLOSURE_SIZE - ENTRANCE_SIZE) / 2 - WALL_THICKNESS,
-  },
-  {
-    x: spawnX + ENCLOSURE_SIZE / 2 - WALL_THICKNESS,
-    y: spawnY - ENCLOSURE_SIZE / 2 + WALL_THICKNESS,
-    width: WALL_THICKNESS,
-    height: (ENCLOSURE_SIZE - ENTRANCE_SIZE) / 2 - WALL_THICKNESS,
-  },
-  {
-    x: spawnX + ENCLOSURE_SIZE / 2 - WALL_THICKNESS,
-    y: spawnY + ENTRANCE_SIZE / 2,
-    width: WALL_THICKNESS,
-    height: (ENCLOSURE_SIZE - ENTRANCE_SIZE) / 2 - WALL_THICKNESS,
-  },
-];
+const TANK_TYPES = {
+  sniper: { speed: 3, size: 30, health: 100, damage: 25, fireRate: 1000 },
+  minigun: { speed: 4, size: 30, health: 120, damage: 10, fireRate: 200 },
+  shotgun: { speed: 2.5, size: 35, health: 150, damage: 40, fireRate: 1500 },
+  default: { speed: 3.5, size: 30, health: 100, damage: 15, fireRate: 500 }
+};
 
 let players = {};
 let bullets = [];
+let walls = []; // You can populate walls here
 
-// Collision helper functions
-function circleRectCollision(cx, cy, radius, rx, ry, rw, rh) {
-  let closestX = Math.max(rx, Math.min(cx, rx + rw));
-  let closestY = Math.max(ry, Math.min(cy, ry + rh));
-  let dx = cx - closestX;
-  let dy = cy - closestY;
-  return (dx * dx + dy * dy) < (radius * radius);
+function createNewPlayer(id, username, tankType) {
+  const type = TANK_TYPES[tankType] || TANK_TYPES.default;
+  return {
+    id,
+    username,
+    tankType,
+    x: Math.random() * ARENA_WIDTH,
+    y: Math.random() * ARENA_HEIGHT,
+    angle: 0,
+    health: type.health,
+    speed: type.speed,
+    size: type.size,
+    damage: type.damage,
+    fireRate: type.fireRate,
+    lastShot: 0,
+  };
 }
 
-function lineRectCollision(x1, y1, x2, y2, rx, ry, rw, rh) {
-  function lineLine(x1, y1, x2, y2, x3, y3, x4, y4) {
-    const denom = (y4 - y3)*(x2 - x1) - (x4 - x3)*(y2 - y1);
-    if (denom === 0) return false;
-    const ua = ((x4 - x3)*(y1 - y3) - (y4 - y3)*(x1 - x3)) / denom;
-    const ub = ((x2 - x1)*(y1 - y3) - (y2 - y1)*(x1 - x3)) / denom;
-    return (ua >= 0 && ua <= 1 && ub >= 0 && ub <= 1);
+function updatePlayer(player, input, dt) {
+  // Validate input and update position and angle
+  if (player.health <= 0) return;
+
+  // Movement
+  let dx = 0, dy = 0;
+  if (input.up) dy -= 1;
+  if (input.down) dy += 1;
+  if (input.left) dx -= 1;
+  if (input.right) dx += 1;
+
+  if (dx !== 0 || dy !== 0) {
+    const length = Math.sqrt(dx*dx + dy*dy);
+    dx /= length;
+    dy /= length;
+    player.x += dx * player.speed * dt;
+    player.y += dy * player.speed * dt;
+
+    // Clamp inside arena
+    player.x = Math.max(0, Math.min(ARENA_WIDTH, player.x));
+    player.y = Math.max(0, Math.min(ARENA_HEIGHT, player.y));
   }
 
-  return (
-    lineLine(x1, y1, x2, y2, rx, ry, rx + rw, ry) ||
-    lineLine(x1, y1, x2, y2, rx, ry, rx, ry + rh) ||
-    lineLine(x1, y1, x2, y2, rx + rw, ry, rx + rw, ry + rh) ||
-    lineLine(x1, y1, x2, y2, rx, ry + rh, rx + rw, ry + rh)
-  );
+  // Update angle
+  player.angle = input.angle;
+
+  // Shooting
+  if (input.shooting) {
+    const now = Date.now();
+    if (now - player.lastShot > player.fireRate) {
+      player.lastShot = now;
+      spawnBullet(player);
+    }
+  }
 }
 
-// Handle client connection
-io.on('connection', (socket) => {
-  console.log('Player connected', socket.id);
-
-  // Create new player
-  players[socket.id] = {
-    id: socket.id,
-    username: 'Anonymous',
-    x: spawnX,
-    y: spawnY,
-    angle: 0,
-    health: 100,
-    tankType: 'sniper',
-    pressingUp: false,
-    pressingDown: false,
-    pressingLeft: false,
-    pressingRight: false,
-    shooting: false,
-    lastShotTime: 0,
-  };
-
-  // Set username
-  socket.on('setUsername', (name) => {
-    if (players[socket.id]) {
-      players[socket.id].username = String(name).substring(0, 15);
-      io.emit('playerUpdated', players[socket.id]);
-    }
+function spawnBullet(player) {
+  // Spawn bullet at player's position heading player.angle
+  bullets.push({
+    id: Date.now() + Math.random(),
+    x: player.x + Math.cos(player.angle) * player.size,
+    y: player.y + Math.sin(player.angle) * player.size,
+    angle: player.angle,
+    speed: 10,
+    ownerId: player.id,
+    radius: 5,
   });
+}
 
-  // Set tank type
-  socket.on('setTankType', (tankType) => {
-    if (players[socket.id]) {
-      const validTypes = ['sniper', 'minigun', 'shotgun'];
-      players[socket.id].tankType = validTypes.includes(tankType) ? tankType : 'sniper';
-      io.emit('playerUpdated', players[socket.id]);
+function updateBullets(dt) {
+  for (let i = bullets.length - 1; i >= 0; i--) {
+    const b = bullets[i];
+    b.x += Math.cos(b.angle) * b.speed * dt;
+    b.y += Math.sin(b.angle) * b.speed * dt;
+
+    // Remove bullets outside arena
+    if (b.x < 0 || b.x > ARENA_WIDTH || b.y < 0 || b.y > ARENA_HEIGHT) {
+      bullets.splice(i, 1);
+      continue;
     }
-  });
 
-  // Handle player input (movement + shooting + angle)
-  socket.on('input', (input) => {
-    const player = players[socket.id];
-    if (!player) return;
+    // Collision with players
+    for (const id in players) {
+      const p = players[id];
+      if (p.id !== b.ownerId && p.health > 0) {
+        const distSq = (p.x - b.x) ** 2 + (p.y - b.y) ** 2;
+        if (distSq < (p.size / 2 + b.radius) ** 2) {
+          // Hit
+          p.health -= players[b.ownerId]?.damage || 10; // fallback damage if owner missing
+          if (p.health < 0) p.health = 0;
+          bullets.splice(i, 1);
+          break;
+        }
+      }
+    }
+  }
+}
 
-    let newX = player.x;
-    let newY = player.y;
+function gameLoop() {
+  const now = Date.now();
+  let lastTime = now;
+  setInterval(() => {
+    const currentTime = Date.now();
+    const dt = (currentTime - lastTime) / 1000;
+    lastTime = currentTime;
 
-    if (input.up) newY -= TANK_SPEED;
-    if (input.down) newY += TANK_SPEED;
-    if (input.left) newX -= TANK_SPEED;
-    if (input.right) newX += TANK_SPEED;
-
-    // Collision detection with walls
-    let collision = false;
-    for (const wall of walls) {
-      if (circleRectCollision(newX, newY, TANK_RADIUS, wall.x, wall.y, wall.width, wall.height)) {
-        collision = true;
-        break;
+    // Update all players (input saved per player)
+    for (const id in players) {
+      const player = players[id];
+      if (player.input) {
+        updatePlayer(player, player.input, dt);
       }
     }
 
-    if (!collision) {
-      player.x = Math.max(TANK_RADIUS, Math.min(ARENA_WIDTH - TANK_RADIUS, newX));
-      player.y = Math.max(TANK_RADIUS, Math.min(ARENA_HEIGHT - TANK_RADIUS, newY));
-    }
+    // Update bullets
+    updateBullets(dt);
 
-    player.angle = input.angle;
-    player.shooting = input.shooting;
+    // Broadcast game state
+    io.emit('gameState', {
+      players,
+      bullets,
+      walls,
+    });
+  }, 1000 / 60);
+}
+
+io.on('connection', (socket) => {
+  console.log('New connection:', socket.id);
+
+  socket.on('setUsername', (username) => {
+    if (players[socket.id]) {
+      players[socket.id].username = username;
+    }
   });
 
-  // Chat message broadcast
+  socket.on('setTankType', (tankType) => {
+    if (!players[socket.id]) {
+      players[socket.id] = createNewPlayer(socket.id, 'Anonymous', tankType);
+    } else {
+      players[socket.id].tankType = tankType;
+    }
+  });
+
+  socket.on('input', (input) => {
+    if (players[socket.id]) {
+      // Validate input here if needed
+      players[socket.id].input = input;
+    }
+  });
+
   socket.on('chatMessage', ({ username, message }) => {
-    if (!username || !message) return;
     io.emit('chatMessage', { username, message });
   });
 
-  // Disconnect cleanup
+  socket.on('respawn', () => {
+    const p = players[socket.id];
+    if (p) {
+      p.health = TANK_TYPES[p.tankType]?.health || 100;
+      p.x = Math.random() * ARENA_WIDTH;
+      p.y = Math.random() * ARENA_HEIGHT;
+    }
+  });
+
   socket.on('disconnect', () => {
-    console.log('Player disconnected', socket.id);
+    console.log('Disconnected:', socket.id);
     delete players[socket.id];
     io.emit('playerDisconnected', socket.id);
   });
-
-  // Respawn player
-  socket.on('respawn', () => {
-    const player = players[socket.id];
-    if (player) {
-      player.health = 100;
-      player.x = spawnX;
-      player.y = spawnY;
-      io.emit('playerUpdated', player);
-    }
-  });
 });
 
-// Main game loop, 60 FPS
-setInterval(() => {
-  const now = Date.now();
-
-  // Handle shooting and bullets
-  for (const id in players) {
-    const p = players[id];
-
-    if (p.shooting && now - p.lastShotTime > 300 && p.health > 0) {
-      let speed = BULLET_SPEED;
-      let maxDistance = 1000;
-      let damage = 20;
-      let radius = 5;
-
-      if (p.tankType === 'sniper') {
-        speed = BULLET_SPEED * 8;
-        maxDistance = 2000;
-      } else if (p.tankType === 'minigun') {
-        speed = BULLET_SPEED * 1.5;
-      } else if (p.tankType === 'shotgun') {
-        speed = BULLET_SPEED * 0.7;
-        radius = 25;
-        damage = 40;
-      }
-
-      bullets.push({
-        id: Math.random().toString(36).substr(2, 9),
-        x: p.x,
-        y: p.y,
-        angle: p.angle,
-        ownerId: id,
-        speed,
-        distanceTravelled: 0,
-        maxDistance,
-        damage,
-        radius,
-      });
-
-      p.lastShotTime = now;
-    }
-  }
-
-  // Update bullet positions & handle collisions
-  bullets = bullets.filter(bullet => {
-    const dx = Math.cos(bullet.angle) * bullet.speed;
-    const dy = Math.sin(bullet.angle) * bullet.speed;
-
-    const nextX = bullet.x + dx;
-    const nextY = bullet.y + dy;
-
-    // Bullet hits wall?
-    for (const wall of walls) {
-      if (lineRectCollision(bullet.x, bullet.y, nextX, nextY, wall.x, wall.y, wall.width, wall.height)) {
-        return false; // remove bullet
-      }
-    }
-
-    bullet.x = nextX;
-    bullet.y = nextY;
-    bullet.distanceTravelled += Math.sqrt(dx * dx + dy * dy);
-
-    // Bullet range exceeded?
-    if (
-      bullet.distanceTravelled > bullet.maxDistance ||
-      bullet.x < 0 || bullet.x > ARENA_WIDTH ||
-      bullet.y < 0 || bullet.y > ARENA_HEIGHT
-    ) return false;
-
-    // Bullet hits player?
-    for (const id in players) {
-      if (id === bullet.ownerId) continue;
-      const p = players[id];
-      const distX = p.x - bullet.x;
-      const distY = p.y - bullet.y;
-      const dist = Math.sqrt(distX * distX + distY * distY);
-
-      if (dist < TANK_RADIUS + (bullet.radius || 5)) {
-        p.health -= bullet.damage;
-        if (p.health <= 0) {
-          p.health = 0;
-          io.to(p.id).emit('playerDied');
-        }
-        return false; // remove bullet on hit
-      }
-    }
-
-    return true;
-  });
-
-  // Send updated game state to all clients
-  io.emit('gameState', { players, bullets, walls });
-}, 1000 / 60);
-
+const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+
+gameLoop();
 
