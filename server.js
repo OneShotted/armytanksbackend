@@ -45,16 +45,39 @@ const PORT = process.env.PORT || 3000;
 
 const TANK_SPEED = 3;
 const BULLET_SPEED = 7;
-const ARENA_WIDTH = 3200;  // doubled from 800
-const ARENA_HEIGHT = 2400; // doubled from 600
+const ARENA_WIDTH = 3200;
+const ARENA_HEIGHT = 2400;
 
-// Walls array — match client-side exactly
-const walls = [
-  { x: 600, y: 600, width: 200, height: 40 },
-  { x: 1500, y: 1200, width: 300, height: 50 },
-  { x: 2500, y: 1800, width: 100, height: 300 },
-  // add more walls as needed
+const SPAWN_SAFE_RADIUS = 150;
+
+// Walls: x, y (top-left), width, height
+let walls = [
+  { x: 100, y: 100, width: 400, height: 20 },
+  { x: 600, y: 300, width: 20, height: 400 },
+  { x: 1500, y: 1500, width: 300, height: 30 },
+  // add more walls as you want here
 ];
+
+// Move walls away from spawn safe zone
+function adjustWallsForSpawn() {
+  const centerX = ARENA_WIDTH / 2;
+  const centerY = ARENA_HEIGHT / 2;
+
+  for (const wall of walls) {
+    const wallCenterX = wall.x + wall.width / 2;
+    const wallCenterY = wall.y + wall.height / 2;
+    const distX = wallCenterX - centerX;
+    const distY = wallCenterY - centerY;
+    const dist = Math.sqrt(distX * distX + distY * distY);
+
+    if (dist < SPAWN_SAFE_RADIUS + Math.max(wall.width, wall.height)) {
+      const angle = Math.atan2(distY, distX);
+      wall.x = centerX + Math.cos(angle) * (SPAWN_SAFE_RADIUS + 100) - wall.width / 2;
+      wall.y = centerY + Math.sin(angle) * (SPAWN_SAFE_RADIUS + 100) - wall.height / 2;
+    }
+  }
+}
+adjustWallsForSpawn();
 
 let players = {};
 let bullets = [];
@@ -63,23 +86,52 @@ app.get('/', (req, res) => {
   res.send('BlockTanks.io Socket.io Server running');
 });
 
+// Simple rectangle collision detection helper
+function rectsCollide(r1, r2) {
+  return !(
+    r2.x > r1.x + r1.width ||
+    r2.x + r2.width < r1.x ||
+    r2.y > r1.y + r1.height ||
+    r2.y + r2.height < r1.y
+  );
+}
+
+// Collision check for player with walls; returns true if colliding
+function isCollidingWithWall(x, y, width, height) {
+  const playerRect = { x, y, width, height };
+  for (const wall of walls) {
+    if (rectsCollide(playerRect, wall)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 io.on('connection', (socket) => {
   console.log('Player connected', socket.id);
+
+  // Player size for collision
+  const PLAYER_SIZE = 40;
+
+  // Spawn point safely outside walls (center)
+  const spawnX = ARENA_WIDTH / 2;
+  const spawnY = ARENA_HEIGHT / 2;
 
   players[socket.id] = {
     id: socket.id,
     username: 'Anonymous',
-    x: ARENA_WIDTH / 2,
-    y: ARENA_HEIGHT / 2,
+    x: spawnX,
+    y: spawnY,
     angle: 0,
     health: 100,
-    tankType: 'sniper', // default tank type
+    tankType: 'sniper',
     pressingUp: false,
     pressingDown: false,
     pressingLeft: false,
     pressingRight: false,
     shooting: false,
     lastShotTime: 0,
+    size: PLAYER_SIZE,
   };
 
   socket.on('setUsername', (name) => {
@@ -115,32 +167,16 @@ io.on('connection', (socket) => {
     io.emit('playerDisconnected', socket.id);
   });
 
-  // Respawn event: reset health and set random position
   socket.on('respawn', () => {
     const player = players[socket.id];
     if (player) {
       player.health = 100;
-      const margin = 50;
-      player.x = Math.random() * (ARENA_WIDTH - 2 * margin) + margin;
-      player.y = Math.random() * (ARENA_HEIGHT - 2 * margin) + margin;
+      player.x = spawnX;
+      player.y = spawnY;
       io.emit('playerUpdated', player);
     }
   });
 });
-
-// Helper: check if two rectangles overlap
-function rectsOverlap(r1, r2) {
-  return !(
-    r1.x + r1.width < r2.x ||
-    r1.x > r2.x + r2.width ||
-    r1.y + r1.height < r2.y ||
-    r1.y > r2.y + r2.height
-  );
-}
-
-// Player size approximation (match your drawTank sizes)
-const PLAYER_WIDTH = 30;
-const PLAYER_HEIGHT = 20;
 
 // Game loop ~60 FPS
 setInterval(() => {
@@ -149,7 +185,6 @@ setInterval(() => {
   for (const id in players) {
     const p = players[id];
 
-    // Calculate proposed new position based on input
     let newX = p.x;
     let newY = p.y;
 
@@ -158,43 +193,27 @@ setInterval(() => {
     if (p.pressingLeft) newX -= TANK_SPEED;
     if (p.pressingRight) newX += TANK_SPEED;
 
-    // Player rectangle at new position
-    const playerRect = {
-      x: newX - PLAYER_WIDTH / 2,
-      y: newY - PLAYER_HEIGHT / 2,
-      width: PLAYER_WIDTH,
-      height: PLAYER_HEIGHT,
-    };
+    // Clamp inside arena
+    newX = Math.max(0, Math.min(ARENA_WIDTH, newX));
+    newY = Math.max(0, Math.min(ARENA_HEIGHT, newY));
 
-    // Check collision with walls
-    let collision = false;
-    for (const wall of walls) {
-      if (rectsOverlap(playerRect, wall)) {
-        collision = true;
-        break;
-      }
-    }
-
-    // If no collision, update position
-    if (!collision) {
+    // Check collision with walls before applying new position
+    const playerSize = p.size || 40;
+    if (!isCollidingWithWall(newX - playerSize / 2, newY - playerSize / 2, playerSize, playerSize)) {
       p.x = newX;
       p.y = newY;
     }
-
-    // Clamp inside arena bounds
-    p.x = Math.max(PLAYER_WIDTH / 2, Math.min(ARENA_WIDTH - PLAYER_WIDTH / 2, p.x));
-    p.y = Math.max(PLAYER_HEIGHT / 2, Math.min(ARENA_HEIGHT - PLAYER_HEIGHT / 2, p.y));
+    // else do not move if collision
 
     // Shooting cooldown and bullet creation
     if (p.shooting && now - p.lastShotTime > 300 && p.health > 0) {
-      // Default bullet params
       let speed = BULLET_SPEED;
-      let maxDistance = 1000; // normal range
+      let maxDistance = 1000;
       let damage = 20;
       let radius = 5;
 
       if (p.tankType === 'sniper') {
-        speed = BULLET_SPEED * 8; // extremely fast
+        speed = BULLET_SPEED * 8;
         maxDistance = 2000;
       } else if (p.tankType === 'minigun') {
         speed = BULLET_SPEED * 1.5;
@@ -231,7 +250,7 @@ setInterval(() => {
     bullet.y += dy;
     bullet.distanceTravelled += Math.sqrt(dx * dx + dy * dy);
 
-     if (
+    if (
       bullet.distanceTravelled > bullet.maxDistance ||
       bullet.x < 0 || bullet.x > ARENA_WIDTH ||
       bullet.y < 0 || bullet.y > ARENA_HEIGHT
@@ -244,22 +263,20 @@ setInterval(() => {
       const distY = p.y - bullet.y;
       const dist = Math.sqrt(distX * distX + distY * distY);
 
-      if (dist < 20 + (bullet.radius || 5)) { // tank radius + bullet radius collision
+      if (dist < 20 + (bullet.radius || 5)) {
         p.health -= bullet.damage;
 
         if (p.health <= 0) {
           p.health = 0;
-
-          // Notify only the player who died
           io.to(p.id).emit('playerDied');
         }
-        return false; // remove bullet
+        return false;
       }
     }
     return true;
   });
 
-  io.emit('gameState', { players, bullets });
+  io.emit('gameState', { players, bullets, walls });
 }, 1000 / 60);
 
 server.listen(PORT, () => {
