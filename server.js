@@ -47,69 +47,101 @@ const ARENA_WIDTH = 3200;
 const ARENA_HEIGHT = 2400;
 const TANK_RADIUS = 20;
 
+// Remove all old walls, create spawn enclosure
+// Square enclosure around spawn with 4 entrances (gaps)
+const spawnX = ARENA_WIDTH / 2;
+const spawnY = ARENA_HEIGHT / 2;
+const ENCLOSURE_SIZE = 600;  // width and height of the square enclosure
+const WALL_THICKNESS = 40;
+const ENTRANCE_SIZE = 100; // size of each gap
+
+const walls = [
+  // Top wall: left segment before gap
+  {
+    x: spawnX - ENCLOSURE_SIZE / 2,
+    y: spawnY - ENCLOSURE_SIZE / 2,
+    width: (ENCLOSURE_SIZE - ENTRANCE_SIZE) / 2,
+    height: WALL_THICKNESS
+  },
+  // Top wall: right segment after gap
+  {
+    x: spawnX + ENTRANCE_SIZE / 2,
+    y: spawnY - ENCLOSURE_SIZE / 2,
+    width: (ENCLOSURE_SIZE - ENTRANCE_SIZE) / 2,
+    height: WALL_THICKNESS
+  },
+
+  // Bottom wall: left segment before gap
+  {
+    x: spawnX - ENCLOSURE_SIZE / 2,
+    y: spawnY + ENCLOSURE_SIZE / 2 - WALL_THICKNESS,
+    width: (ENCLOSURE_SIZE - ENTRANCE_SIZE) / 2,
+    height: WALL_THICKNESS
+  },
+  // Bottom wall: right segment after gap
+  {
+    x: spawnX + ENTRANCE_SIZE / 2,
+    y: spawnY + ENCLOSURE_SIZE / 2 - WALL_THICKNESS,
+    width: (ENCLOSURE_SIZE - ENTRANCE_SIZE) / 2,
+    height: WALL_THICKNESS
+  },
+
+  // Left wall: top segment before gap
+  {
+    x: spawnX - ENCLOSURE_SIZE / 2,
+    y: spawnY - ENCLOSURE_SIZE / 2 + WALL_THICKNESS,
+    width: WALL_THICKNESS,
+    height: (ENCLOSURE_SIZE - ENTRANCE_SIZE) / 2 - WALL_THICKNESS
+  },
+  // Left wall: bottom segment after gap
+  {
+    x: spawnX - ENCLOSURE_SIZE / 2,
+    y: spawnY + ENTRANCE_SIZE / 2,
+    width: WALL_THICKNESS,
+    height: (ENCLOSURE_SIZE - ENTRANCE_SIZE) / 2 - WALL_THICKNESS
+  },
+
+  // Right wall: top segment before gap
+  {
+    x: spawnX + ENCLOSURE_SIZE / 2 - WALL_THICKNESS,
+    y: spawnY - ENCLOSURE_SIZE / 2 + WALL_THICKNESS,
+    width: WALL_THICKNESS,
+    height: (ENCLOSURE_SIZE - ENTRANCE_SIZE) / 2 - WALL_THICKNESS
+  },
+  // Right wall: bottom segment after gap
+  {
+    x: spawnX + ENCLOSURE_SIZE / 2 - WALL_THICKNESS,
+    y: spawnY + ENTRANCE_SIZE / 2,
+    width: WALL_THICKNESS,
+    height: (ENCLOSURE_SIZE - ENTRANCE_SIZE) / 2 - WALL_THICKNESS
+  },
+];
+
 let players = {};
 let bullets = [];
 
-// Define walls as rectangles { x, y, width, height }
-// Inspired by Centralia map — broken roads & ruins, leaving spawn free
-const walls = [
-  // Roads and cracks (horizontal and vertical strips)
-  { x: 0, y: 500, width: 1200, height: 40 },
-  { x: 1300, y: 500, width: 1500, height: 40 },
-  { x: 0, y: 1000, width: 1400, height: 40 },
-  { x: 1500, y: 1000, width: 1600, height: 40 },
-  { x: 0, y: 1500, width: 3200, height: 40 },
-  
-  { x: 600, y: 0, width: 40, height: 700 },
-  { x: 1100, y: 700, width: 40, height: 900 },
-  { x: 1700, y: 0, width: 40, height: 1600 },
-  { x: 2200, y: 700, width: 40, height: 1200 },
-
-  // Ruins & debris blocks (some rectangular blocks, scattered)
-  { x: 1800, y: 1400, width: 300, height: 100 },
-  { x: 2100, y: 1600, width: 250, height: 120 },
-  { x: 100, y: 1900, width: 400, height: 150 },
-  { x: 1400, y: 1900, width: 350, height: 150 },
-
-  // More ruins (keep spawn at center clear around 1600,1200)
-  { x: 600, y: 2100, width: 400, height: 200 },
-  { x: 2500, y: 1800, width: 450, height: 200 },
-
-  // Outer boundary walls (arena edges) - optional if arena bounds exist
-  // { x: 0, y: 0, width: 3200, height: 20 },
-  // { x: 0, y: 2380, width: 3200, height: 20 },
-  // { x: 0, y: 0, width: 20, height: 2400 },
-  // { x: 3180, y: 0, width: 20, height: 2400 },
-];
-
-// Simple function to detect circle-rectangle collision (for tanks)
 function circleRectCollision(cx, cy, radius, rx, ry, rw, rh) {
-  // Find closest point to circle center on rectangle
   let closestX = Math.max(rx, Math.min(cx, rx + rw));
   let closestY = Math.max(ry, Math.min(cy, ry + rh));
-
   let dx = cx - closestX;
   let dy = cy - closestY;
-
   return (dx * dx + dy * dy) < (radius * radius);
 }
 
-// Simple function to detect line-rectangle intersection (for bullets)
 function lineRectCollision(x1, y1, x2, y2, rx, ry, rw, rh) {
-  // Check line intersects any of the 4 rect edges
   function lineLine(x1, y1, x2, y2, x3, y3, x4, y4) {
     const denom = (y4 - y3)*(x2 - x1) - (x4 - x3)*(y2 - y1);
-    if (denom === 0) return false; // Parallel
+    if (denom === 0) return false;
     const ua = ((x4 - x3)*(y1 - y3) - (y4 - y3)*(x1 - x3)) / denom;
     const ub = ((x2 - x1)*(y1 - y3) - (y2 - y1)*(x1 - x3)) / denom;
     return (ua >= 0 && ua <= 1 && ub >= 0 && ub <= 1);
   }
 
   if (
-    lineLine(x1, y1, x2, y2, rx, ry, rx + rw, ry) || // top
-    lineLine(x1, y1, x2, y2, rx, ry, rx, ry + rh) || // left
-    lineLine(x1, y1, x2, y2, rx + rw, ry, rx + rw, ry + rh) || // right
-    lineLine(x1, y1, x2, y2, rx, ry + rh, rx + rw, ry + rh) // bottom
+    lineLine(x1, y1, x2, y2, rx, ry, rx + rw, ry) ||
+    lineLine(x1, y1, x2, y2, rx, ry, rx, ry + rh) ||
+    lineLine(x1, y1, x2, y2, rx + rw, ry, rx + rw, ry + rh) ||
+    lineLine(x1, y1, x2, y2, rx, ry + rh, rx + rw, ry + rh)
   ) {
     return true;
   }
@@ -126,8 +158,8 @@ io.on('connection', (socket) => {
   players[socket.id] = {
     id: socket.id,
     username: 'Anonymous',
-    x: ARENA_WIDTH / 2 + 200,  // Spawn offset so not inside walls
-    y: ARENA_HEIGHT / 2 + 200,
+    x: spawnX,
+    y: spawnY,
     angle: 0,
     health: 100,
     tankType: 'sniper',
@@ -166,7 +198,7 @@ io.on('connection', (socket) => {
     if (input.left) newX -= TANK_SPEED;
     if (input.right) newX += TANK_SPEED;
 
-    // Check collision with walls, cancel movement if colliding
+    // Collision with walls (including spawn enclosure)
     let collision = false;
     for (const wall of walls) {
       if (circleRectCollision(newX, newY, TANK_RADIUS, wall.x, wall.y, wall.width, wall.height)) {
@@ -193,26 +225,19 @@ io.on('connection', (socket) => {
     const player = players[socket.id];
     if (player) {
       player.health = 100;
-      const margin = 50;
-      // Respawn somewhere near center but away from walls spawn area
-      player.x = ARENA_WIDTH / 2 + 200 + (Math.random() * 100 - 50);
-      player.y = ARENA_HEIGHT / 2 + 200 + (Math.random() * 100 - 50);
+      player.x = spawnX;
+      player.y = spawnY;
       io.emit('playerUpdated', player);
     }
   });
 });
 
-// Game loop ~60 FPS
 setInterval(() => {
   const now = Date.now();
 
   for (const id in players) {
     const p = players[id];
 
-    // Move tank only if no collision (already handled on input but just to be safe)
-    // We do not update position here, only emit latest positions and states
-
-    // Shooting cooldown and bullet creation
     if (p.shooting && now - p.lastShotTime > 300 && p.health > 0) {
       let speed = BULLET_SPEED;
       let maxDistance = 1000;
@@ -254,10 +279,9 @@ setInterval(() => {
     const nextX = bullet.x + dx;
     const nextY = bullet.y + dy;
 
-    // Check bullet collision with walls (line from old pos to next pos)
     for (const wall of walls) {
       if (lineRectCollision(bullet.x, bullet.y, nextX, nextY, wall.x, wall.y, wall.width, wall.height)) {
-        return false; // bullet hits wall, remove bullet
+        return false;
       }
     }
 
@@ -271,7 +295,6 @@ setInterval(() => {
       bullet.y < 0 || bullet.y > ARENA_HEIGHT
     ) return false;
 
-    // Check collision with players
     for (const id in players) {
       if (id === bullet.ownerId) continue;
       const p = players[id];
@@ -286,7 +309,7 @@ setInterval(() => {
           p.health = 0;
           io.to(p.id).emit('playerDied');
         }
-        return false; // remove bullet
+        return false;
       }
     }
 
@@ -299,3 +322,4 @@ setInterval(() => {
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+
