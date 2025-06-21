@@ -47,79 +47,77 @@ const ARENA_WIDTH = 3200;
 const ARENA_HEIGHT = 2400;
 const TANK_RADIUS = 20;
 
-// Remove all old walls, create spawn enclosure
-// Square enclosure around spawn with 4 entrances (gaps)
-const spawnX = ARENA_WIDTH / 2;
-const spawnY = ARENA_HEIGHT / 2;
-const ENCLOSURE_SIZE = 600;  // width and height of the square enclosure
+const spawnX = Math.floor(ARENA_WIDTH / 2);
+const spawnY = Math.floor(ARENA_HEIGHT / 2);
+
+const ENCLOSURE_SIZE = 600;
 const WALL_THICKNESS = 40;
-const ENTRANCE_SIZE = 100; // size of each gap
+const ENTRANCE_SIZE = 100;
 
+// Walls placed relative to spawnX/spawnY with integer coords for crispness
 const walls = [
-  // Top wall: left segment before gap
+  // Top wall left segment
   {
     x: spawnX - ENCLOSURE_SIZE / 2,
     y: spawnY - ENCLOSURE_SIZE / 2,
     width: (ENCLOSURE_SIZE - ENTRANCE_SIZE) / 2,
-    height: WALL_THICKNESS
+    height: WALL_THICKNESS,
   },
-  // Top wall: right segment after gap
+  // Top wall right segment
   {
     x: spawnX + ENTRANCE_SIZE / 2,
     y: spawnY - ENCLOSURE_SIZE / 2,
     width: (ENCLOSURE_SIZE - ENTRANCE_SIZE) / 2,
-    height: WALL_THICKNESS
+    height: WALL_THICKNESS,
   },
-
-  // Bottom wall: left segment before gap
+  // Bottom wall left segment
   {
     x: spawnX - ENCLOSURE_SIZE / 2,
     y: spawnY + ENCLOSURE_SIZE / 2 - WALL_THICKNESS,
     width: (ENCLOSURE_SIZE - ENTRANCE_SIZE) / 2,
-    height: WALL_THICKNESS
+    height: WALL_THICKNESS,
   },
-  // Bottom wall: right segment after gap
+  // Bottom wall right segment
   {
     x: spawnX + ENTRANCE_SIZE / 2,
     y: spawnY + ENCLOSURE_SIZE / 2 - WALL_THICKNESS,
     width: (ENCLOSURE_SIZE - ENTRANCE_SIZE) / 2,
-    height: WALL_THICKNESS
+    height: WALL_THICKNESS,
   },
-
-  // Left wall: top segment before gap
+  // Left wall top segment
   {
     x: spawnX - ENCLOSURE_SIZE / 2,
     y: spawnY - ENCLOSURE_SIZE / 2 + WALL_THICKNESS,
     width: WALL_THICKNESS,
-    height: (ENCLOSURE_SIZE - ENTRANCE_SIZE) / 2 - WALL_THICKNESS
+    height: (ENCLOSURE_SIZE - ENTRANCE_SIZE) / 2 - WALL_THICKNESS,
   },
-  // Left wall: bottom segment after gap
+  // Left wall bottom segment
   {
     x: spawnX - ENCLOSURE_SIZE / 2,
     y: spawnY + ENTRANCE_SIZE / 2,
     width: WALL_THICKNESS,
-    height: (ENCLOSURE_SIZE - ENTRANCE_SIZE) / 2 - WALL_THICKNESS
+    height: (ENCLOSURE_SIZE - ENTRANCE_SIZE) / 2 - WALL_THICKNESS,
   },
-
-  // Right wall: top segment before gap
+  // Right wall top segment
   {
     x: spawnX + ENCLOSURE_SIZE / 2 - WALL_THICKNESS,
     y: spawnY - ENCLOSURE_SIZE / 2 + WALL_THICKNESS,
     width: WALL_THICKNESS,
-    height: (ENCLOSURE_SIZE - ENTRANCE_SIZE) / 2 - WALL_THICKNESS
+    height: (ENCLOSURE_SIZE - ENTRANCE_SIZE) / 2 - WALL_THICKNESS,
   },
-  // Right wall: bottom segment after gap
+  // Right wall bottom segment
   {
     x: spawnX + ENCLOSURE_SIZE / 2 - WALL_THICKNESS,
     y: spawnY + ENTRANCE_SIZE / 2,
     width: WALL_THICKNESS,
-    height: (ENCLOSURE_SIZE - ENTRANCE_SIZE) / 2 - WALL_THICKNESS
+    height: (ENCLOSURE_SIZE - ENTRANCE_SIZE) / 2 - WALL_THICKNESS,
   },
 ];
 
 let players = {};
 let bullets = [];
 
+// Collision helpers same as before
 function circleRectCollision(cx, cy, radius, rx, ry, rw, rh) {
   let closestX = Math.max(rx, Math.min(cx, rx + rw));
   let closestY = Math.max(ry, Math.min(cy, ry + rh));
@@ -190,6 +188,7 @@ io.on('connection', (socket) => {
     const player = players[socket.id];
     if (!player) return;
 
+    // Calculate new position
     let newX = player.x;
     let newY = player.y;
 
@@ -198,7 +197,7 @@ io.on('connection', (socket) => {
     if (input.left) newX -= TANK_SPEED;
     if (input.right) newX += TANK_SPEED;
 
-    // Collision with walls (including spawn enclosure)
+    // Check collision with walls
     let collision = false;
     for (const wall of walls) {
       if (circleRectCollision(newX, newY, TANK_RADIUS, wall.x, wall.y, wall.width, wall.height)) {
@@ -208,9 +207,11 @@ io.on('connection', (socket) => {
     }
 
     if (!collision) {
-      player.x = Math.max(0, Math.min(ARENA_WIDTH, newX));
-      player.y = Math.max(0, Math.min(ARENA_HEIGHT, newY));
+      // Clamp to arena bounds
+      player.x = Math.max(TANK_RADIUS, Math.min(ARENA_WIDTH - TANK_RADIUS, newX));
+      player.y = Math.max(TANK_RADIUS, Math.min(ARENA_HEIGHT - TANK_RADIUS, newY));
     }
+
     player.angle = input.angle;
     player.shooting = input.shooting;
   });
@@ -279,6 +280,7 @@ setInterval(() => {
     const nextX = bullet.x + dx;
     const nextY = bullet.y + dy;
 
+    // Bullet collision with walls blocks bullet
     for (const wall of walls) {
       if (lineRectCollision(bullet.x, bullet.y, nextX, nextY, wall.x, wall.y, wall.width, wall.height)) {
         return false;
@@ -322,4 +324,3 @@ setInterval(() => {
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
-
