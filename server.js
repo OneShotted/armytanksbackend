@@ -216,6 +216,19 @@ io.on('connection', (socket) => {
     player.shooting = input.shooting;
   });
 
+  // New chat message handler
+  socket.on('chatMessage', (msg) => {
+    const player = players[socket.id];
+    if (!player) return;
+    const message = {
+      id: socket.id,
+      username: player.username,
+      text: String(msg).substring(0, 200), // limit message length
+      timestamp: Date.now(),
+    };
+    io.emit('chatMessage', message);
+  });
+
   socket.on('disconnect', () => {
     console.log('Player disconnected', socket.id);
     delete players[socket.id];
