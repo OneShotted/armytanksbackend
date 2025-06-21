@@ -8,17 +8,15 @@ const cors = require('cors');
 const app = express();
 const server = http.createServer(app);
 
-// Allowed frontend origins for CORS
 const allowedOrigins = [
   'https://armytanks.netlify.app',
-  'http://localhost:3000', // local dev
+  'http://localhost:3000',
 ];
 
-// CORS middleware for Express routes
 app.use(cors({
   origin: function(origin, callback) {
-    if (!origin) return callback(null, true); // allow non-browser clients like Postman
-    if (allowedOrigins.indexOf(origin) !== -1) {
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
       callback(new Error('CORS error: Origin not allowed'));
@@ -31,7 +29,7 @@ const io = new Server(server, {
   cors: {
     origin: function(origin, callback) {
       if (!origin) return callback(null, true);
-      if (allowedOrigins.indexOf(origin) !== -1) {
+      if (allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
         callback(new Error('CORS error: Origin not allowed'));
@@ -47,81 +45,89 @@ const TANK_SPEED = 3;
 const BULLET_SPEED = 7;
 const ARENA_WIDTH = 3200;
 const ARENA_HEIGHT = 2400;
-
-const SPAWN_SAFE_RADIUS = 150;
-
-// Walls: x, y (top-left), width, height
-let walls = [
-  { x: 100, y: 100, width: 400, height: 20 },
-  { x: 600, y: 300, width: 20, height: 400 },
-  { x: 1500, y: 1500, width: 300, height: 30 },
-  // add more walls as you want here
-];
-
-// Move walls away from spawn safe zone
-function adjustWallsForSpawn() {
-  const centerX = ARENA_WIDTH / 2;
-  const centerY = ARENA_HEIGHT / 2;
-
-  for (const wall of walls) {
-    const wallCenterX = wall.x + wall.width / 2;
-    const wallCenterY = wall.y + wall.height / 2;
-    const distX = wallCenterX - centerX;
-    const distY = wallCenterY - centerY;
-    const dist = Math.sqrt(distX * distX + distY * distY);
-
-    if (dist < SPAWN_SAFE_RADIUS + Math.max(wall.width, wall.height)) {
-      const angle = Math.atan2(distY, distX);
-      wall.x = centerX + Math.cos(angle) * (SPAWN_SAFE_RADIUS + 100) - wall.width / 2;
-      wall.y = centerY + Math.sin(angle) * (SPAWN_SAFE_RADIUS + 100) - wall.height / 2;
-    }
-  }
-}
-adjustWallsForSpawn();
+const TANK_RADIUS = 20;
 
 let players = {};
 let bullets = [];
+
+// Define walls as rectangles { x, y, width, height }
+// Inspired by Centralia map — broken roads & ruins, leaving spawn free
+const walls = [
+  // Roads and cracks (horizontal and vertical strips)
+  { x: 0, y: 500, width: 1200, height: 40 },
+  { x: 1300, y: 500, width: 1500, height: 40 },
+  { x: 0, y: 1000, width: 1400, height: 40 },
+  { x: 1500, y: 1000, width: 1600, height: 40 },
+  { x: 0, y: 1500, width: 3200, height: 40 },
+  
+  { x: 600, y: 0, width: 40, height: 700 },
+  { x: 1100, y: 700, width: 40, height: 900 },
+  { x: 1700, y: 0, width: 40, height: 1600 },
+  { x: 2200, y: 700, width: 40, height: 1200 },
+
+  // Ruins & debris blocks (some rectangular blocks, scattered)
+  { x: 1800, y: 1400, width: 300, height: 100 },
+  { x: 2100, y: 1600, width: 250, height: 120 },
+  { x: 100, y: 1900, width: 400, height: 150 },
+  { x: 1400, y: 1900, width: 350, height: 150 },
+
+  // More ruins (keep spawn at center clear around 1600,1200)
+  { x: 600, y: 2100, width: 400, height: 200 },
+  { x: 2500, y: 1800, width: 450, height: 200 },
+
+  // Outer boundary walls (arena edges) - optional if arena bounds exist
+  // { x: 0, y: 0, width: 3200, height: 20 },
+  // { x: 0, y: 2380, width: 3200, height: 20 },
+  // { x: 0, y: 0, width: 20, height: 2400 },
+  // { x: 3180, y: 0, width: 20, height: 2400 },
+];
+
+// Simple function to detect circle-rectangle collision (for tanks)
+function circleRectCollision(cx, cy, radius, rx, ry, rw, rh) {
+  // Find closest point to circle center on rectangle
+  let closestX = Math.max(rx, Math.min(cx, rx + rw));
+  let closestY = Math.max(ry, Math.min(cy, ry + rh));
+
+  let dx = cx - closestX;
+  let dy = cy - closestY;
+
+  return (dx * dx + dy * dy) < (radius * radius);
+}
+
+// Simple function to detect line-rectangle intersection (for bullets)
+function lineRectCollision(x1, y1, x2, y2, rx, ry, rw, rh) {
+  // Check line intersects any of the 4 rect edges
+  function lineLine(x1, y1, x2, y2, x3, y3, x4, y4) {
+    const denom = (y4 - y3)*(x2 - x1) - (x4 - x3)*(y2 - y1);
+    if (denom === 0) return false; // Parallel
+    const ua = ((x4 - x3)*(y1 - y3) - (y4 - y3)*(x1 - x3)) / denom;
+    const ub = ((x2 - x1)*(y1 - y3) - (y2 - y1)*(x1 - x3)) / denom;
+    return (ua >= 0 && ua <= 1 && ub >= 0 && ub <= 1);
+  }
+
+  if (
+    lineLine(x1, y1, x2, y2, rx, ry, rx + rw, ry) || // top
+    lineLine(x1, y1, x2, y2, rx, ry, rx, ry + rh) || // left
+    lineLine(x1, y1, x2, y2, rx + rw, ry, rx + rw, ry + rh) || // right
+    lineLine(x1, y1, x2, y2, rx, ry + rh, rx + rw, ry + rh) // bottom
+  ) {
+    return true;
+  }
+  return false;
+}
 
 app.get('/', (req, res) => {
   res.send('BlockTanks.io Socket.io Server running');
 });
 
-// Simple rectangle collision detection helper
-function rectsCollide(r1, r2) {
-  return !(
-    r2.x > r1.x + r1.width ||
-    r2.x + r2.width < r1.x ||
-    r2.y > r1.y + r1.height ||
-    r2.y + r2.height < r1.y
-  );
-}
-
-// Collision check for player with walls; returns true if colliding
-function isCollidingWithWall(x, y, width, height) {
-  const playerRect = { x, y, width, height };
-  for (const wall of walls) {
-    if (rectsCollide(playerRect, wall)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 io.on('connection', (socket) => {
   console.log('Player connected', socket.id);
-
-  // Player size for collision
-  const PLAYER_SIZE = 40;
-
-  // Spawn point safely outside walls (center)
-  const spawnX = ARENA_WIDTH / 2;
-  const spawnY = ARENA_HEIGHT / 2;
 
   players[socket.id] = {
     id: socket.id,
     username: 'Anonymous',
-    x: spawnX,
-    y: spawnY,
+    x: ARENA_WIDTH / 2 + 200,  // Spawn offset so not inside walls
+    y: ARENA_HEIGHT / 2 + 200,
     angle: 0,
     health: 100,
     tankType: 'sniper',
@@ -131,7 +137,6 @@ io.on('connection', (socket) => {
     pressingRight: false,
     shooting: false,
     lastShotTime: 0,
-    size: PLAYER_SIZE,
   };
 
   socket.on('setUsername', (name) => {
@@ -153,10 +158,27 @@ io.on('connection', (socket) => {
     const player = players[socket.id];
     if (!player) return;
 
-    player.pressingUp = input.up;
-    player.pressingDown = input.down;
-    player.pressingLeft = input.left;
-    player.pressingRight = input.right;
+    let newX = player.x;
+    let newY = player.y;
+
+    if (input.up) newY -= TANK_SPEED;
+    if (input.down) newY += TANK_SPEED;
+    if (input.left) newX -= TANK_SPEED;
+    if (input.right) newX += TANK_SPEED;
+
+    // Check collision with walls, cancel movement if colliding
+    let collision = false;
+    for (const wall of walls) {
+      if (circleRectCollision(newX, newY, TANK_RADIUS, wall.x, wall.y, wall.width, wall.height)) {
+        collision = true;
+        break;
+      }
+    }
+
+    if (!collision) {
+      player.x = Math.max(0, Math.min(ARENA_WIDTH, newX));
+      player.y = Math.max(0, Math.min(ARENA_HEIGHT, newY));
+    }
     player.angle = input.angle;
     player.shooting = input.shooting;
   });
@@ -171,8 +193,10 @@ io.on('connection', (socket) => {
     const player = players[socket.id];
     if (player) {
       player.health = 100;
-      player.x = spawnX;
-      player.y = spawnY;
+      const margin = 50;
+      // Respawn somewhere near center but away from walls spawn area
+      player.x = ARENA_WIDTH / 2 + 200 + (Math.random() * 100 - 50);
+      player.y = ARENA_HEIGHT / 2 + 200 + (Math.random() * 100 - 50);
       io.emit('playerUpdated', player);
     }
   });
@@ -185,25 +209,8 @@ setInterval(() => {
   for (const id in players) {
     const p = players[id];
 
-    let newX = p.x;
-    let newY = p.y;
-
-    if (p.pressingUp) newY -= TANK_SPEED;
-    if (p.pressingDown) newY += TANK_SPEED;
-    if (p.pressingLeft) newX -= TANK_SPEED;
-    if (p.pressingRight) newX += TANK_SPEED;
-
-    // Clamp inside arena
-    newX = Math.max(0, Math.min(ARENA_WIDTH, newX));
-    newY = Math.max(0, Math.min(ARENA_HEIGHT, newY));
-
-    // Check collision with walls before applying new position
-    const playerSize = p.size || 40;
-    if (!isCollidingWithWall(newX - playerSize / 2, newY - playerSize / 2, playerSize, playerSize)) {
-      p.x = newX;
-      p.y = newY;
-    }
-    // else do not move if collision
+    // Move tank only if no collision (already handled on input but just to be safe)
+    // We do not update position here, only emit latest positions and states
 
     // Shooting cooldown and bullet creation
     if (p.shooting && now - p.lastShotTime > 300 && p.health > 0) {
@@ -217,12 +224,10 @@ setInterval(() => {
         maxDistance = 2000;
       } else if (p.tankType === 'minigun') {
         speed = BULLET_SPEED * 1.5;
-        maxDistance = 1000;
       } else if (p.tankType === 'shotgun') {
         speed = BULLET_SPEED * 0.5;
         radius = 10;
         damage = 40;
-        maxDistance = 1000;
       }
 
       bullets.push({
@@ -231,23 +236,33 @@ setInterval(() => {
         y: p.y,
         angle: p.angle,
         ownerId: id,
-        speed: speed,
+        speed,
         distanceTravelled: 0,
-        maxDistance: maxDistance,
-        damage: damage,
-        radius: radius,
+        maxDistance,
+        damage,
+        radius,
       });
 
       p.lastShotTime = now;
     }
   }
 
-  bullets = bullets.filter((bullet) => {
+  bullets = bullets.filter(bullet => {
     const dx = Math.cos(bullet.angle) * bullet.speed;
     const dy = Math.sin(bullet.angle) * bullet.speed;
 
-    bullet.x += dx;
-    bullet.y += dy;
+    const nextX = bullet.x + dx;
+    const nextY = bullet.y + dy;
+
+    // Check bullet collision with walls (line from old pos to next pos)
+    for (const wall of walls) {
+      if (lineRectCollision(bullet.x, bullet.y, nextX, nextY, wall.x, wall.y, wall.width, wall.height)) {
+        return false; // bullet hits wall, remove bullet
+      }
+    }
+
+    bullet.x = nextX;
+    bullet.y = nextY;
     bullet.distanceTravelled += Math.sqrt(dx * dx + dy * dy);
 
     if (
@@ -256,6 +271,7 @@ setInterval(() => {
       bullet.y < 0 || bullet.y > ARENA_HEIGHT
     ) return false;
 
+    // Check collision with players
     for (const id in players) {
       if (id === bullet.ownerId) continue;
       const p = players[id];
@@ -263,16 +279,17 @@ setInterval(() => {
       const distY = p.y - bullet.y;
       const dist = Math.sqrt(distX * distX + distY * distY);
 
-      if (dist < 20 + (bullet.radius || 5)) {
+      if (dist < TANK_RADIUS + (bullet.radius || 5)) {
         p.health -= bullet.damage;
 
         if (p.health <= 0) {
           p.health = 0;
           io.to(p.id).emit('playerDied');
         }
-        return false;
+        return false; // remove bullet
       }
     }
+
     return true;
   });
 
