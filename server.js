@@ -251,8 +251,8 @@ setInterval(() => {
       } else if (p.tankType === 'minigun') {
         speed = BULLET_SPEED * 1.5;
       } else if (p.tankType === 'shotgun') {
-        speed = BULLET_SPEED * 0.5;
-        radius = 10;
+        speed = BULLET_SPEED * 0.7;
+        radius = 25;
         damage = 40;
       }
 
