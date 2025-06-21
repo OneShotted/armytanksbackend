@@ -106,6 +106,7 @@ const walls = [
 let players = {};
 let bullets = [];
 
+// Collision helper functions
 function circleRectCollision(cx, cy, radius, rx, ry, rw, rh) {
   let closestX = Math.max(rx, Math.min(cx, rx + rw));
   let closestY = Math.max(ry, Math.min(cy, ry + rh));
@@ -131,13 +132,11 @@ function lineRectCollision(x1, y1, x2, y2, rx, ry, rw, rh) {
   );
 }
 
-app.get('/', (req, res) => {
-  res.send('ArmyTanks.io server is running');
-});
-
+// Handle client connection
 io.on('connection', (socket) => {
   console.log('Player connected', socket.id);
 
+  // Create new player
   players[socket.id] = {
     id: socket.id,
     username: 'Anonymous',
@@ -154,6 +153,7 @@ io.on('connection', (socket) => {
     lastShotTime: 0,
   };
 
+  // Set username
   socket.on('setUsername', (name) => {
     if (players[socket.id]) {
       players[socket.id].username = String(name).substring(0, 15);
@@ -161,6 +161,7 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Set tank type
   socket.on('setTankType', (tankType) => {
     if (players[socket.id]) {
       const validTypes = ['sniper', 'minigun', 'shotgun'];
@@ -169,6 +170,7 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Handle player input (movement + shooting + angle)
   socket.on('input', (input) => {
     const player = players[socket.id];
     if (!player) return;
@@ -181,6 +183,7 @@ io.on('connection', (socket) => {
     if (input.left) newX -= TANK_SPEED;
     if (input.right) newX += TANK_SPEED;
 
+    // Collision detection with walls
     let collision = false;
     for (const wall of walls) {
       if (circleRectCollision(newX, newY, TANK_RADIUS, wall.x, wall.y, wall.width, wall.height)) {
@@ -198,18 +201,20 @@ io.on('connection', (socket) => {
     player.shooting = input.shooting;
   });
 
-  // CHAT MESSAGE handler: receive from client and broadcast
+  // Chat message broadcast
   socket.on('chatMessage', ({ username, message }) => {
     if (!username || !message) return;
     io.emit('chatMessage', { username, message });
   });
 
+  // Disconnect cleanup
   socket.on('disconnect', () => {
     console.log('Player disconnected', socket.id);
     delete players[socket.id];
     io.emit('playerDisconnected', socket.id);
   });
 
+  // Respawn player
   socket.on('respawn', () => {
     const player = players[socket.id];
     if (player) {
@@ -221,9 +226,11 @@ io.on('connection', (socket) => {
   });
 });
 
+// Main game loop, 60 FPS
 setInterval(() => {
   const now = Date.now();
 
+  // Handle shooting and bullets
   for (const id in players) {
     const p = players[id];
 
@@ -261,6 +268,7 @@ setInterval(() => {
     }
   }
 
+  // Update bullet positions & handle collisions
   bullets = bullets.filter(bullet => {
     const dx = Math.cos(bullet.angle) * bullet.speed;
     const dy = Math.sin(bullet.angle) * bullet.speed;
@@ -268,9 +276,10 @@ setInterval(() => {
     const nextX = bullet.x + dx;
     const nextY = bullet.y + dy;
 
+    // Bullet hits wall?
     for (const wall of walls) {
       if (lineRectCollision(bullet.x, bullet.y, nextX, nextY, wall.x, wall.y, wall.width, wall.height)) {
-        return false;
+        return false; // remove bullet
       }
     }
 
@@ -278,12 +287,14 @@ setInterval(() => {
     bullet.y = nextY;
     bullet.distanceTravelled += Math.sqrt(dx * dx + dy * dy);
 
+    // Bullet range exceeded?
     if (
       bullet.distanceTravelled > bullet.maxDistance ||
       bullet.x < 0 || bullet.x > ARENA_WIDTH ||
       bullet.y < 0 || bullet.y > ARENA_HEIGHT
     ) return false;
 
+    // Bullet hits player?
     for (const id in players) {
       if (id === bullet.ownerId) continue;
       const p = players[id];
@@ -297,13 +308,14 @@ setInterval(() => {
           p.health = 0;
           io.to(p.id).emit('playerDied');
         }
-        return false;
+        return false; // remove bullet on hit
       }
     }
 
     return true;
   });
 
+  // Send updated game state to all clients
   io.emit('gameState', { players, bullets, walls });
 }, 1000 / 60);
 
